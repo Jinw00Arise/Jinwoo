@@ -1,0 +1,79 @@
+package config
+
+import (
+	"os"
+
+	"github.com/joho/godotenv"
+)
+
+type ServerConfig struct {
+	Host string
+	Port string
+}
+
+type LoginConfig struct {
+	ServerConfig
+	DatabaseURL   string
+	DebugPackets  bool
+	AutoRegister  bool
+	GameVersion   uint16
+	PatchVersion  string
+	Locale        byte
+	ChannelHost   string
+	ChannelPort   string
+}
+
+type ChannelConfig struct {
+	ServerConfig
+	DatabaseURL  string
+	DebugPackets bool
+	GameVersion  uint16
+	PatchVersion string
+	Locale       byte
+	WorldID      byte
+	ChannelID    byte
+}
+
+func Load() *LoginConfig {
+	godotenv.Load() // Ignore error - .env is optional
+
+	return &LoginConfig{
+		ServerConfig: ServerConfig{
+			Host: getEnv("LOGIN_HOST", "127.0.0.1"),
+			Port: getEnv("LOGIN_PORT", "8484"),
+		},
+		DatabaseURL:  getEnv("DATABASE_URL", "postgres://localhost:5432/jinwoo?sslmode=disable"),
+		DebugPackets: getEnv("DEBUG_PACKETS", "") != "",
+		AutoRegister: getEnv("AUTO_REGISTER", "") != "",
+		GameVersion:  95,
+		PatchVersion: "1",
+		Locale:       8, // GMS
+		ChannelHost:  getEnv("CHANNEL_HOST", "127.0.0.1"),
+		ChannelPort:  getEnv("CHANNEL_PORT", "8585"),
+	}
+}
+
+func LoadChannel() *ChannelConfig {
+	godotenv.Load()
+
+	return &ChannelConfig{
+		ServerConfig: ServerConfig{
+			Host: getEnv("CHANNEL_HOST", "127.0.0.1"),
+			Port: getEnv("CHANNEL_PORT", "8585"),
+		},
+		DatabaseURL:  getEnv("DATABASE_URL", "postgres://localhost:5432/jinwoo?sslmode=disable"),
+		DebugPackets: getEnv("DEBUG_PACKETS", "") != "",
+		GameVersion:  95,
+		PatchVersion: "1",
+		Locale:       8,
+		WorldID:      0,
+		ChannelID:    0,
+	}
+}
+
+func getEnv(key, fallback string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return fallback
+}
