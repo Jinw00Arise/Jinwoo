@@ -156,7 +156,16 @@ func buildQuestCompletePacket(questID uint16) []byte {
 
 // Stat flags for StatChanged packet
 const (
-	StatHP uint32 = 0x400
+	StatHP    uint32 = 0x400
+	StatMP    uint32 = 0x1000
+	StatEXP   uint32 = 0x10000
+	StatMoney uint32 = 0x40000
+)
+
+// Message types for SendMessage
+const (
+	MessageTypeIncEXP   byte = 3
+	MessageTypeIncMoney byte = 6
 )
 
 // buildStatChangedPacket creates a packet to update HP
@@ -167,6 +176,60 @@ func buildStatChangedPacket(hp int) []byte {
 	p.WriteInt(uint32(hp))      // HP value
 	p.WriteByte(0)              // bEnableByStat
 	p.WriteByte(0)              // bEnableByItem
+	return p
+}
+
+// buildExpStatPacket creates a packet to update EXP stat
+func buildExpStatPacket(exp int32) []byte {
+	p := packet.NewWithOpcode(maple.SendStatChanged)
+	p.WriteBool(true)           // bExclRequestSent
+	p.WriteInt(StatEXP)         // stat flag
+	p.WriteInt(uint32(exp))     // EXP value
+	p.WriteByte(0)              // bEnableByStat
+	p.WriteByte(0)              // bEnableByItem
+	return p
+}
+
+// buildMesoStatPacket creates a packet to update Meso stat
+func buildMesoStatPacket(meso int32) []byte {
+	p := packet.NewWithOpcode(maple.SendStatChanged)
+	p.WriteBool(true)           // bExclRequestSent
+	p.WriteInt(StatMoney)       // stat flag
+	p.WriteInt(uint32(meso))    // Meso value
+	p.WriteByte(0)              // bEnableByStat
+	p.WriteByte(0)              // bEnableByItem
+	return p
+}
+
+// buildExpMessagePacket creates a packet to show EXP gain notification
+func buildExpMessagePacket(exp int32, quest bool) []byte {
+	p := packet.NewWithOpcode(maple.SendMessage)
+	p.WriteByte(MessageTypeIncEXP)
+	p.WriteBool(true)           // white (yellow if false)
+	p.WriteInt(uint32(exp))     // exp amount
+	p.WriteBool(quest)          // bOnQuest
+	p.WriteInt(0)               // bonus event exp
+	p.WriteByte(0)              // nMobEventBonusPercentage
+	p.WriteByte(0)              // ignored
+	p.WriteInt(0)               // nWeddingBonusEXP
+	if quest {
+		p.WriteByte(0)          // nSpiritWeekEventEXP
+	}
+	p.WriteByte(0)              // nPartyBonusEventRate
+	p.WriteInt(0)               // nPartyBonusExp
+	p.WriteInt(0)               // nItemBonusEXP
+	p.WriteInt(0)               // nPremiumIPEXP
+	p.WriteInt(0)               // nRainbowWeekEventEXP
+	p.WriteInt(0)               // nPartyEXPRingEXP
+	p.WriteInt(0)               // nCakePieEventBonus
+	return p
+}
+
+// buildMesoMessagePacket creates a packet to show Meso gain notification
+func buildMesoMessagePacket(meso int32) []byte {
+	p := packet.NewWithOpcode(maple.SendMessage)
+	p.WriteByte(MessageTypeIncMoney)
+	p.WriteInt(uint32(meso))
 	return p
 }
 

@@ -14,6 +14,13 @@ import (
 	"github.com/Jinw00Arise/Jinwoo/pkg/maple"
 )
 
+// QuestRecord represents an in-progress or completed quest
+type QuestRecord struct {
+	State        byte   // QuestStatePerform or QuestStateComplete
+	Value        string // Progress value for in-progress quests
+	CompleteTime int64  // Unix nano for completed quests
+}
+
 type Handler struct {
 	conn            *network.Connection
 	config          *config.ChannelConfig
@@ -21,15 +28,19 @@ type Handler struct {
 	character       *models.Character
 	fieldKey        byte
 	nextObjectID    uint32
-	spawnedNPCs     map[uint32]int       // object ID -> NPC template ID
+	spawnedNPCs     map[uint32]int           // object ID -> NPC template ID
 	npcConversation *script.NPCConversation
+	activeQuests    map[uint16]*QuestRecord  // questID -> record (in progress)
+	completedQuests map[uint16]*QuestRecord  // questID -> record (completed)
 }
 
 func NewHandler(conn *network.Connection, cfg *config.ChannelConfig, characters *repository.CharacterRepository) *Handler {
 	return &Handler{
-		conn:       conn,
-		config:     cfg,
-		characters: characters,
+		conn:            conn,
+		config:          cfg,
+		characters:      characters,
+		activeQuests:    make(map[uint16]*QuestRecord),
+		completedQuests: make(map[uint16]*QuestRecord),
 	}
 }
 
@@ -53,10 +64,12 @@ func (h *Handler) Handle(p packet.Packet) {
 		h.handleUserScriptMessageAnswer(reader)
 	case maple.RecvUserPortalScriptRequest:
 		h.handleUserPortalScriptRequest(reader)
+	case maple.RecvUserChangeStatRequest:
+		h.handleUserChangeStatRequest(reader)
 	case maple.RecvAliveAck, maple.RecvUpdateScreenSetting:
 		// Keep-alive and screen settings, ignore
-	case maple.RecvNpcMove, maple.RecvRequireFieldObstacleStatus, maple.RecvCancelInvitePartyMatch, maple.RecvClientDumpLog:
-		// Field-related requests and client error logs, ignore for now
+	case maple.RecvNpcMove, maple.RecvRequireFieldObstacleStatus, maple.RecvCancelInvitePartyMatch, maple.RecvClientDumpLog, maple.RecvUserEmotion:
+		// Field-related requests, client error logs, and cosmetic actions, ignore for now
 	default:
 		log.Printf("Unhandled opcode: 0x%04X (%d)", reader.Opcode, reader.Opcode)
 	}
@@ -81,7 +94,7 @@ func (h *Handler) handleMigrateIn(reader *packet.Reader) {
 	log.Printf("Player %s (id=%d) entering game", char.Name, char.ID)
 
 	// Send SetField to spawn the player
-	if err := h.conn.Write(SetFieldPacket(char, int(h.config.ChannelID), h.fieldKey)); err != nil {
+	if err := h.conn.Write(SetFieldPacketWithQuests(char, int(h.config.ChannelID), h.fieldKey, h.getQuestData())); err != nil {
 		log.Printf("Failed to send SetField: %v", err)
 		return
 	}
@@ -152,6 +165,28 @@ func (h *Handler) spawnMapNPCs(mapID int) {
 	}
 
 	log.Printf("Spawned %d NPCs on map %d", len(mapData.NPCs), mapID)
+}
+
+// getQuestData builds quest data for SetField packet
+func (h *Handler) getQuestData() *QuestData {
+	if len(h.activeQuests) == 0 && len(h.completedQuests) == 0 {
+		return nil
+	}
+	
+	qd := &QuestData{
+		ActiveQuests:    make(map[uint16]string),
+		CompletedQuests: make(map[uint16]int64),
+	}
+	
+	for questID, record := range h.activeQuests {
+		qd.ActiveQuests[questID] = record.Value
+	}
+	
+	for questID, record := range h.completedQuests {
+		qd.CompletedQuests[questID] = record.CompleteTime
+	}
+	
+	return qd
 }
 
 func (h *Handler) handleUserMove(reader *packet.Reader) {
@@ -304,8 +339,8 @@ func (h *Handler) transferToMap(mapID int32, portalName string) {
 	h.spawnedNPCs = make(map[uint32]int)
 	h.nextObjectID = 1000
 
-	// Send SetField for new map
-	if err := h.conn.Write(SetFieldPacket(h.character, int(h.config.ChannelID), h.fieldKey)); err != nil {
+	// Send SetField for new map (with quest data preserved)
+	if err := h.conn.Write(SetFieldPacketWithQuests(h.character, int(h.config.ChannelID), h.fieldKey, h.getQuestData())); err != nil {
 		log.Printf("[Transfer] Failed to send SetField: %v", err)
 		return
 	}
@@ -398,6 +433,24 @@ func (h *Handler) runQuestScript(scriptContent string, questID, npcID int) {
 		log.Printf("[Quest] Failed to start quest script: %v", err)
 		h.conn.Write(EnableActionsPacket())
 		return
+	}
+
+	// Set quest callbacks for server-side tracking
+	conv.OnQuestStart = func(qID uint16) {
+		h.activeQuests[qID] = &QuestRecord{
+			State: QuestStatePerform,
+			Value: "",
+		}
+		delete(h.completedQuests, qID)
+		log.Printf("[Quest] Server tracking: started quest %d for %s", qID, h.character.Name)
+	}
+	conv.OnQuestComplete = func(qID uint16) {
+		h.completedQuests[qID] = &QuestRecord{
+			State:        QuestStateComplete,
+			CompleteTime: time.Now().UnixNano(),
+		}
+		delete(h.activeQuests, qID)
+		log.Printf("[Quest] Server tracking: completed quest %d for %s", qID, h.character.Name)
 	}
 
 	// Store the conversation and run in background
@@ -515,6 +568,14 @@ func (h *Handler) handleUserQuestRequest(reader *packet.Reader) {
 func (h *Handler) startQuest(questID uint16, npcID uint32) {
 	// TODO: Validate quest requirements
 	
+	// Track quest in memory
+	h.activeQuests[questID] = &QuestRecord{
+		State: QuestStatePerform,
+		Value: "",
+	}
+	// Remove from completed if it was there (re-doing quest)
+	delete(h.completedQuests, questID)
+	
 	// Update quest record to "started" state
 	if err := h.conn.Write(MessageQuestRecordPacket(questID, QuestStatePerform, "", 0)); err != nil {
 		log.Printf("Failed to send quest record update: %v", err)
@@ -536,8 +597,16 @@ func (h *Handler) startQuest(questID uint16, npcID uint32) {
 }
 
 func (h *Handler) completeQuest(questID uint16, npcID uint32, selection int32) {
-	// Update quest record to "complete" state
+	// Track quest completion in memory
 	completeTime := time.Now().UnixNano()
+	h.completedQuests[questID] = &QuestRecord{
+		State:        QuestStateComplete,
+		CompleteTime: completeTime,
+	}
+	// Remove from active
+	delete(h.activeQuests, questID)
+	
+	// Update quest record to "complete" state
 	if err := h.conn.Write(MessageQuestRecordPacket(questID, QuestStateComplete, "", completeTime)); err != nil {
 		log.Printf("Failed to send quest complete record: %v", err)
 		return
@@ -558,6 +627,9 @@ func (h *Handler) completeQuest(questID uint16, npcID uint32, selection int32) {
 }
 
 func (h *Handler) resignQuest(questID uint16) {
+	// Remove from tracking
+	delete(h.activeQuests, questID)
+	
 	// Update quest record to "none" state (delete)
 	if err := h.conn.Write(MessageQuestRecordPacket(questID, QuestStateNone, "", 0)); err != nil {
 		log.Printf("Failed to send quest resign record: %v", err)
@@ -635,6 +707,57 @@ func (h *Handler) giveQuestRewards(rewards *wz.QuestActData, isStart bool) {
 	}
 	
 	// TODO: Save character changes to database
+}
+
+// Stat Change Handlers
+
+func (h *Handler) handleUserChangeStatRequest(reader *packet.Reader) {
+	if h.character == nil {
+		return
+	}
+
+	_ = reader.ReadInt() // update_time
+	mask := reader.ReadInt()
+
+	// Mask 0x1400 = StatHP (0x400) | StatMP (0x1000) - HP/MP recovery
+	if mask != 0x1400 {
+		log.Printf("[Stats] Unhandled mask for UserChangeStatRequest: 0x%X", mask)
+		h.conn.Write(EnableActionsPacket())
+		return
+	}
+
+	hpToAdd := int32(reader.ReadShort()) // nHP
+	mpToAdd := int32(reader.ReadShort()) // nMP
+
+	stats := make(map[uint32]int64)
+
+	if hpToAdd > 0 {
+		newHP := h.character.HP + hpToAdd
+		if newHP > h.character.MaxHP {
+			newHP = h.character.MaxHP
+		}
+		h.character.HP = newHP
+		stats[StatHP] = int64(h.character.HP)
+	}
+
+	if mpToAdd > 0 {
+		newMP := h.character.MP + mpToAdd
+		if newMP > h.character.MaxMP {
+			newMP = h.character.MaxMP
+		}
+		h.character.MP = newMP
+		stats[StatMP] = int64(h.character.MP)
+	}
+
+	if len(stats) > 0 {
+		log.Printf("[Stats] %s recovered HP:%d MP:%d (now HP:%d/%d MP:%d/%d)", 
+			h.character.Name, hpToAdd, mpToAdd, 
+			h.character.HP, h.character.MaxHP, h.character.MP, h.character.MaxMP)
+
+		if err := h.conn.Write(StatChangedPacket(true, stats)); err != nil {
+			log.Printf("Failed to send stat change: %v", err)
+		}
+	}
 }
 
 // NPC Script Handlers

@@ -8,7 +8,17 @@ import (
 	"github.com/Jinw00Arise/Jinwoo/pkg/maple"
 )
 
+// QuestData represents quest information for SetField packet
+type QuestData struct {
+	ActiveQuests    map[uint16]string // questID -> progress value
+	CompletedQuests map[uint16]int64  // questID -> completion time (unix nano)
+}
+
 func SetFieldPacket(char *models.Character, channelID int, fieldKey byte) packet.Packet {
+	return SetFieldPacketWithQuests(char, channelID, fieldKey, nil)
+}
+
+func SetFieldPacketWithQuests(char *models.Character, channelID int, fieldKey byte, quests *QuestData) packet.Packet {
 	p := packet.NewWithOpcode(maple.SendSetField)
 
 	// SetField header
@@ -26,7 +36,7 @@ func SetFieldPacket(char *models.Character, channelID int, fieldKey byte) packet
 	p.WriteInt(seed ^ 0x87654321)
 
 	// CharacterData::Decode
-	writeCharacterData(&p, char)
+	writeCharacterDataWithQuests(&p, char, quests)
 
 	// CWvsContext::OnSetLogoutGiftConfig
 	p.WriteInt(0) // bPredictQuit
@@ -42,6 +52,10 @@ func SetFieldPacket(char *models.Character, channelID int, fieldKey byte) packet
 }
 
 func writeCharacterData(p *packet.Packet, char *models.Character) {
+	writeCharacterDataWithQuests(p, char, nil)
+}
+
+func writeCharacterDataWithQuests(p *packet.Packet, char *models.Character, quests *QuestData) {
 	// DBChar flag - ALL = -1 (0xFFFFFFFFFFFFFFFF as unsigned)
 	p.WriteLong(0xFFFFFFFFFFFFFFFF)
 
@@ -92,10 +106,26 @@ func writeCharacterData(p *packet.Packet, char *models.Character) {
 	p.WriteShort(0) // No cooldowns
 
 	// QUESTRECORD flag (started quests)
-	p.WriteShort(0) // No started quests
+	if quests != nil && len(quests.ActiveQuests) > 0 {
+		p.WriteShort(uint16(len(quests.ActiveQuests)))
+		for questID, value := range quests.ActiveQuests {
+			p.WriteShort(questID)
+			p.WriteString(value)
+		}
+	} else {
+		p.WriteShort(0)
+	}
 
 	// QUESTCOMPLETE flag (completed quests)
-	p.WriteShort(0) // No completed quests
+	if quests != nil && len(quests.CompletedQuests) > 0 {
+		p.WriteShort(uint16(len(quests.CompletedQuests)))
+		for questID, completeTime := range quests.CompletedQuests {
+			p.WriteShort(questID)
+			writeFileTime(p, time.Unix(0, completeTime))
+		}
+	} else {
+		p.WriteShort(0)
+	}
 
 	// MINIGAMERECORD flag - 2 records (omok and memory game)
 	p.WriteShort(2)
@@ -315,23 +345,23 @@ func QuestFailedMesoPacket() packet.Packet {
 	return p
 }
 
-// Message types for SendMessage packet
+// Message types for SendMessage packet (CWvsContext::OnMessage)
 const (
-	MessageTypeDropPickUp   byte = 0
-	MessageTypeQuestRecord  byte = 1
-	MessageTypeCashItemExp  byte = 2
-	MessageTypeIncEXP       byte = 3
-	MessageTypeIncPOP       byte = 4  // Fame
-	MessageTypeIncMoney     byte = 5  // Meso
-	MessageTypeIncGP        byte = 6  // Guild points
-	MessageTypeGiveBuff     byte = 7
-	MessageTypeGenItemExp   byte = 8
-	MessageTypeSystem       byte = 9
-	MessageTypeQuestRecordEx byte = 10
-	MessageTypeItemProtect  byte = 11
-	MessageTypeItemExpire   byte = 12
-	MessageTypeSkillExpire  byte = 13
-	MessageTypeIncSP        byte = 14
+	MessageTypeDropPickUp        byte = 0
+	MessageTypeQuestRecord       byte = 1
+	MessageTypeCashItemExpire    byte = 2
+	MessageTypeIncEXP            byte = 3
+	MessageTypeIncSP             byte = 4  // SP gain
+	MessageTypeIncPOP            byte = 5  // Fame/POP
+	MessageTypeIncMoney          byte = 6  // Meso
+	MessageTypeIncGP             byte = 7  // Guild points
+	MessageTypeGiveBuff          byte = 8
+	MessageTypeGeneralItemExpire byte = 9
+	MessageTypeSystem            byte = 10
+	MessageTypeQuestRecordEx     byte = 11
+	MessageTypeItemProtectExpire byte = 12 // Safety charm
+	MessageTypeItemExpireReplace byte = 13
+	MessageTypeSkillExpire       byte = 14
 )
 
 // Quest states

@@ -11,14 +11,17 @@ import (
 
 // NPCConversation represents an active NPC conversation
 type NPCConversation struct {
-	NPCID       int
-	Character   *models.Character
-	State       *lua.LState
-	Script      string
-	SendPacket  func([]byte) error
-	WaitingFor  NPCMessageType
-	ResponseCh  chan NPCResponse
-	mu          sync.Mutex
+	NPCID           int
+	Character       *models.Character
+	State           *lua.LState
+	Script          string
+	SendPacket      func([]byte) error
+	WaitingFor      NPCMessageType
+	ResponseCh      chan NPCResponse
+	mu              sync.Mutex
+	// Quest callbacks for server-side tracking
+	OnQuestStart    func(questID uint16)
+	OnQuestComplete func(questID uint16)
 }
 
 // NPCMessageType represents different NPC message types
@@ -391,18 +394,48 @@ func npcWarp(conv *NPCConversation) lua.LGFunction {
 
 func npcGiveExp(conv *NPCConversation) lua.LGFunction {
 	return func(L *lua.LState) int {
-		exp := L.CheckInt(1)
+		exp := int32(L.CheckInt(1))
 		log.Printf("[Script] Give %d EXP to %s", exp, conv.Character.Name)
-		// TODO: Actually give EXP
+		
+		// Update character EXP
+		conv.Character.EXP += exp
+		
+		// Send stat update packet
+		statPacket := buildExpStatPacket(conv.Character.EXP)
+		if err := conv.SendPacket(statPacket); err != nil {
+			log.Printf("Failed to send EXP stat: %v", err)
+		}
+		
+		// Send EXP gain message (shows notification)
+		msgPacket := buildExpMessagePacket(exp, true)
+		if err := conv.SendPacket(msgPacket); err != nil {
+			log.Printf("Failed to send EXP message: %v", err)
+		}
+		
 		return 0
 	}
 }
 
 func npcGiveMeso(conv *NPCConversation) lua.LGFunction {
 	return func(L *lua.LState) int {
-		meso := L.CheckInt(1)
+		meso := int32(L.CheckInt(1))
 		log.Printf("[Script] Give %d Meso to %s", meso, conv.Character.Name)
-		// TODO: Actually give meso
+		
+		// Update character Meso
+		conv.Character.Meso += meso
+		
+		// Send stat update packet
+		statPacket := buildMesoStatPacket(conv.Character.Meso)
+		if err := conv.SendPacket(statPacket); err != nil {
+			log.Printf("Failed to send Meso stat: %v", err)
+		}
+		
+		// Send Meso gain message (shows notification)
+		msgPacket := buildMesoMessagePacket(meso)
+		if err := conv.SendPacket(msgPacket); err != nil {
+			log.Printf("Failed to send Meso message: %v", err)
+		}
+		
 		return 0
 	}
 }
@@ -482,12 +515,18 @@ func npcBalloonMessage(conv *NPCConversation) lua.LGFunction {
 
 func npcForceCompleteQuest(conv *NPCConversation) lua.LGFunction {
 	return func(L *lua.LState) int {
-		questID := L.CheckInt(1)
+		questID := uint16(L.CheckInt(1))
 		log.Printf("[Script] Force completing quest %d for %s", questID, conv.Character.Name)
+		
 		// Send quest complete record
-		packet := buildQuestCompletePacket(uint16(questID))
+		packet := buildQuestCompletePacket(questID)
 		if err := conv.SendPacket(packet); err != nil {
 			log.Printf("Failed to send quest complete: %v", err)
+		}
+		
+		// Call server-side callback if set
+		if conv.OnQuestComplete != nil {
+			conv.OnQuestComplete(questID)
 		}
 		return 0
 	}
@@ -495,12 +534,18 @@ func npcForceCompleteQuest(conv *NPCConversation) lua.LGFunction {
 
 func npcForceStartQuest(conv *NPCConversation) lua.LGFunction {
 	return func(L *lua.LState) int {
-		questID := L.CheckInt(1)
+		questID := uint16(L.CheckInt(1))
 		log.Printf("[Script] Force starting quest %d for %s", questID, conv.Character.Name)
+		
 		// Send quest start record
-		packet := buildQuestStartPacket(uint16(questID))
+		packet := buildQuestStartPacket(questID)
 		if err := conv.SendPacket(packet); err != nil {
 			log.Printf("Failed to send quest start: %v", err)
+		}
+		
+		// Call server-side callback if set
+		if conv.OnQuestStart != nil {
+			conv.OnQuestStart(questID)
 		}
 		return 0
 	}

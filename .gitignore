@@ -41,4 +41,4 @@ Thumbs.db
 .env
 
 # Game Data
-/data
+/data*.pid
