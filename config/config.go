@@ -32,6 +32,8 @@ type ChannelConfig struct {
 	Locale       byte
 	WorldID      byte
 	ChannelID    byte
+	WZPath       string
+	ScriptsPath  string
 }
 
 func Load() *LoginConfig {
@@ -68,6 +70,8 @@ func LoadChannel() *ChannelConfig {
 		Locale:       8,
 		WorldID:      0,
 		ChannelID:    0,
+		WZPath:       getEnv("WZ_PATH", "data/wz"),
+		ScriptsPath:  getEnv("SCRIPTS_PATH", "scripts"),
 	}
 }
 

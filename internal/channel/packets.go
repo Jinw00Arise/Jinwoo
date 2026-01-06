@@ -8,16 +8,16 @@ import (
 	"github.com/Jinw00Arise/Jinwoo/pkg/maple"
 )
 
-func SetFieldPacket(char *models.Character, channelID int) packet.Packet {
+func SetFieldPacket(char *models.Character, channelID int, fieldKey byte) packet.Packet {
 	p := packet.NewWithOpcode(maple.SendSetField)
 
 	// SetField header
-	p.WriteShort(0)             // CClientOptMan::DecodeOpt
+	p.WriteShort(0)               // CClientOptMan::DecodeOpt
 	p.WriteInt(uint32(channelID)) // nChannelID
-	p.WriteInt(0)               // dwOldDriverID
-	p.WriteByte(1)              // bFieldKey
-	p.WriteByte(1)              // bCharacterData (true = migration, sends full data)
-	p.WriteShort(0)             // nNotifierCheck
+	p.WriteInt(0)                 // dwOldDriverID
+	p.WriteByte(fieldKey)         // bFieldKey
+	p.WriteByte(1)                // bCharacterData (true = migration, sends full data)
+	p.WriteShort(0)               // nNotifierCheck
 
 	// CalcDamage seeds
 	seed := uint32(time.Now().UnixNano())
@@ -212,5 +212,282 @@ func UserChatPacket(characterID uint, message string, onlyBalloon bool, isAdmin 
 	p.WriteBool(onlyBalloon) // Only show balloon, not in chat log
 	p.WriteByte(0)           // nSpeechBubbleFlags (0 = normal)
 	p.WriteByte(0)           // nCharacterInfoFlags (0 = normal)
+	return p
+}
+
+// NpcEnterFieldPacket creates a packet to spawn an NPC on the map
+func NpcEnterFieldPacket(objectID uint32, npcID int, x, y int16, f bool, fh uint16, rx0, rx1 int16) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendNpcEnterField)
+	p.WriteInt(objectID) // dwNpcId (object ID, not template ID)
+	p.WriteInt(uint32(npcID)) // dwTemplateID
+	p.WriteShort(uint16(x))   // Position X
+	p.WriteShort(uint16(y))   // Position Y
+	if f {
+		p.WriteByte(0) // Move action (facing left)
+	} else {
+		p.WriteByte(1) // Move action (facing right)
+	}
+	p.WriteShort(fh)          // Foothold
+	p.WriteShort(uint16(rx0)) // Left bound
+	p.WriteShort(uint16(rx1)) // Right bound
+	p.WriteBool(true)         // bEnabled (NPC is active)
+	return p
+}
+
+// NpcLeaveFieldPacket creates a packet to remove an NPC from the map
+func NpcLeaveFieldPacket(objectID uint32) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendNpcLeaveField)
+	p.WriteInt(objectID)
+	return p
+}
+
+// NpcChangeControllerPacket creates a packet to set NPC controller
+func NpcChangeControllerPacket(control bool, objectID uint32, npcID int, x, y int16, f bool, fh uint16, rx0, rx1 int16) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendNpcChangeController)
+	p.WriteBool(control)      // true = give control, false = remove control
+	p.WriteInt(objectID)      // dwNpcId (object ID)
+	if control {
+		p.WriteInt(uint32(npcID)) // dwTemplateID
+		p.WriteShort(uint16(x))   // Position X
+		p.WriteShort(uint16(y))   // Position Y
+		if f {
+			p.WriteByte(0) // Move action (facing left)
+		} else {
+			p.WriteByte(1) // Move action (facing right)
+		}
+		p.WriteShort(fh)          // Foothold
+		p.WriteShort(uint16(rx0)) // Left bound
+		p.WriteShort(uint16(rx1)) // Right bound
+		p.WriteBool(true)         // bEnabled
+	}
+	return p
+}
+
+// Quest result types (from QuestResultType enum)
+const (
+	// QuestRes - Timer related
+	QuestResultStartQuestTimer     byte = 6
+	QuestResultEndQuestTimer       byte = 7
+	QuestResultStartTimeKeepTimer  byte = 8
+	QuestResultEndTimeKeepTimer    byte = 9
+	
+	// QuestRes_Act - Action results
+	QuestResultSuccess             byte = 10
+	QuestResultFailedUnknown       byte = 11
+	QuestResultFailedInventory     byte = 12
+	QuestResultFailedMeso          byte = 13
+	QuestResultFailedPet           byte = 14
+	QuestResultFailedEquipped      byte = 15
+	QuestResultFailedOnlyItem      byte = 16
+	QuestResultFailedTimeOver      byte = 17
+	QuestResultResetQuestTimer     byte = 18
+)
+
+// QuestSuccessPacket creates a quest success result packet
+func QuestSuccessPacket(questID uint16, npcTemplateID uint32, nextQuestID uint16) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendUserQuestResult)
+	p.WriteByte(QuestResultSuccess)
+	p.WriteShort(questID)
+	p.WriteInt(npcTemplateID)
+	p.WriteShort(nextQuestID) // 0 = no next quest
+	return p
+}
+
+// QuestFailedUnknownPacket creates a generic quest failure packet
+func QuestFailedUnknownPacket() packet.Packet {
+	p := packet.NewWithOpcode(maple.SendUserQuestResult)
+	p.WriteByte(QuestResultFailedUnknown)
+	return p
+}
+
+// QuestFailedInventoryPacket creates a quest failure due to inventory packet
+func QuestFailedInventoryPacket(questID uint16) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendUserQuestResult)
+	p.WriteByte(QuestResultFailedInventory)
+	p.WriteShort(questID)
+	return p
+}
+
+// QuestFailedMesoPacket creates a quest failure due to meso packet
+func QuestFailedMesoPacket() packet.Packet {
+	p := packet.NewWithOpcode(maple.SendUserQuestResult)
+	p.WriteByte(QuestResultFailedMeso)
+	return p
+}
+
+// Message types for SendMessage packet
+const (
+	MessageTypeDropPickUp   byte = 0
+	MessageTypeQuestRecord  byte = 1
+	MessageTypeCashItemExp  byte = 2
+	MessageTypeIncEXP       byte = 3
+	MessageTypeIncPOP       byte = 4  // Fame
+	MessageTypeIncMoney     byte = 5  // Meso
+	MessageTypeIncGP        byte = 6  // Guild points
+	MessageTypeGiveBuff     byte = 7
+	MessageTypeGenItemExp   byte = 8
+	MessageTypeSystem       byte = 9
+	MessageTypeQuestRecordEx byte = 10
+	MessageTypeItemProtect  byte = 11
+	MessageTypeItemExpire   byte = 12
+	MessageTypeSkillExpire  byte = 13
+	MessageTypeIncSP        byte = 14
+)
+
+// Quest states
+const (
+	QuestStateNone     byte = 0 // Not started / deleted
+	QuestStatePerform  byte = 1 // In progress
+	QuestStateComplete byte = 2 // Completed
+)
+
+// MessageQuestRecordPacket creates a packet to update quest record (start/progress/complete)
+func MessageQuestRecordPacket(questID uint16, state byte, value string, completeTime int64) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMessage)
+	p.WriteByte(MessageTypeQuestRecord)
+	p.WriteShort(questID)
+	p.WriteByte(state)
+	
+	switch state {
+	case QuestStateNone:
+		p.WriteBool(true) // delete quest
+	case QuestStatePerform:
+		p.WriteString(value) // quest progress value
+	case QuestStateComplete:
+		// Write FileTime for completion
+		writeFileTime(&p, time.Unix(0, completeTime))
+	}
+	
+	return p
+}
+
+// MessageIncExpPacket creates an EXP gain message
+func MessageIncExpPacket(exp int32, partyBonus int32, white bool, quest bool) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMessage)
+	p.WriteByte(MessageTypeIncEXP)
+	p.WriteBool(white)
+	p.WriteInt(uint32(exp))
+	p.WriteBool(quest)
+	p.WriteInt(0) // bonus event exp
+	p.WriteByte(0) // nMobEventBonusPercentage
+	p.WriteByte(0) // ignored
+	p.WriteInt(0) // nWeddingBonusEXP
+	if quest {
+		p.WriteByte(0) // nSpiritWeekEventEXP
+	}
+	p.WriteByte(0) // nPartyBonusEventRate
+	p.WriteInt(uint32(partyBonus))
+	p.WriteInt(0) // nItemBonusEXP
+	p.WriteInt(0) // nPremiumIPEXP
+	p.WriteInt(0) // nRainbowWeekEventEXP
+	p.WriteInt(0) // nPartyEXPRingEXP
+	p.WriteInt(0) // nCakePieEventBonus
+	return p
+}
+
+// MessageIncMoneyPacket creates a meso gain message
+func MessageIncMoneyPacket(money int32) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMessage)
+	p.WriteByte(MessageTypeIncMoney)
+	p.WriteInt(uint32(money))
+	return p
+}
+
+// MessageIncPopPacket creates a fame gain message
+func MessageIncPopPacket(pop int32) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMessage)
+	p.WriteByte(MessageTypeIncPOP)
+	p.WriteInt(uint32(pop))
+	return p
+}
+
+// MessageSystemPacket creates a system message
+func MessageSystemPacket(text string) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMessage)
+	p.WriteByte(MessageTypeSystem)
+	p.WriteString(text)
+	return p
+}
+
+// Stat flags for StatChanged packet
+const (
+	StatSkin       uint32 = 0x1
+	StatFace       uint32 = 0x2
+	StatHair       uint32 = 0x4
+	StatLevel      uint32 = 0x10
+	StatJob        uint32 = 0x20
+	StatSTR        uint32 = 0x40
+	StatDEX        uint32 = 0x80
+	StatINT        uint32 = 0x100
+	StatLUK        uint32 = 0x200
+	StatHP         uint32 = 0x400
+	StatMaxHP      uint32 = 0x800
+	StatMP         uint32 = 0x1000
+	StatMaxMP      uint32 = 0x2000
+	StatAP         uint32 = 0x4000
+	StatSP         uint32 = 0x8000
+	StatEXP        uint32 = 0x10000
+	StatPOP        uint32 = 0x20000  // Fame
+	StatMoney      uint32 = 0x40000  // Meso
+	StatPet        uint32 = 0x180008 // Pet-related
+)
+
+// EnableActionsPacket sends an empty stat change to unlock player movement
+func EnableActionsPacket() packet.Packet {
+	return StatChangedPacket(true, nil)
+}
+
+// StatChangedPacket creates a packet to update character stats
+func StatChangedPacket(exclRequest bool, stats map[uint32]int64) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendStatChanged)
+	p.WriteBool(exclRequest) // bExclRequestSent
+	
+	// Calculate flag from stats
+	var flag uint32
+	for statFlag := range stats {
+		flag |= statFlag
+	}
+	p.WriteInt(flag)
+	
+	// Write stats in order of flag bits
+	statOrder := []uint32{
+		StatSkin, StatFace, StatHair, StatLevel, StatJob,
+		StatSTR, StatDEX, StatINT, StatLUK,
+		StatHP, StatMaxHP, StatMP, StatMaxMP,
+		StatAP, StatSP, StatEXP, StatPOP, StatMoney,
+	}
+	
+	for _, statFlag := range statOrder {
+		if flag&statFlag != 0 {
+			val := stats[statFlag]
+			switch statFlag {
+			case StatSkin, StatFace, StatHair:
+				p.WriteByte(byte(val))
+			case StatLevel:
+				p.WriteByte(byte(val))
+			case StatJob:
+				p.WriteShort(uint16(val))
+			case StatSTR, StatDEX, StatINT, StatLUK:
+				p.WriteShort(uint16(val))
+			case StatHP, StatMaxHP, StatMP, StatMaxMP:
+				p.WriteInt(uint32(val))
+			case StatAP:
+				p.WriteShort(uint16(val))
+			case StatSP:
+				p.WriteShort(uint16(val))
+			case StatEXP:
+				p.WriteInt(uint32(val))
+			case StatPOP:
+				p.WriteShort(uint16(val))
+			case StatMoney:
+				p.WriteInt(uint32(val))
+			}
+		}
+	}
+	
+	// Secondary stat (enabled abilities) - for HP/MP recovery
+	p.WriteByte(0)  // bEnableByStat
+	p.WriteByte(0)  // bEnableByItem
+	
 	return p
 }

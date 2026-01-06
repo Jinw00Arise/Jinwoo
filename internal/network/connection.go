@@ -15,13 +15,15 @@ var debugPackets bool
 
 // Ignored opcodes - only logged in debug mode
 var ignoredRecvOpcodes = map[uint16]bool{
-	maple.RecvCreateSecurityHandle: true,
-	maple.RecvUpdateScreenSetting:  true,
-	maple.RecvAliveAck:             true,
-	maple.RecvUserMove:             true,
-	maple.RecvUserEmotion:          true,
-	maple.RecvMobMove:              true,
-	maple.RecvNpcMove:              true,
+	maple.RecvCreateSecurityHandle:       true,
+	maple.RecvUpdateScreenSetting:        true,
+	maple.RecvAliveAck:                   true,
+	maple.RecvUserMove:                   true,
+	maple.RecvUserEmotion:                true,
+	maple.RecvMobMove:                    true,
+	maple.RecvNpcMove:                    true,
+	maple.RecvRequireFieldObstacleStatus: true,
+	maple.RecvCancelInvitePartyMatch:     true,
 }
 
 var ignoredSendOpcodes = map[uint16]bool{
@@ -70,7 +72,7 @@ func (c *Connection) Write(p packet.Packet) error {
 	if len(p) >= 2 {
 		opcode := uint16(p[0]) | uint16(p[1])<<8
 		if !ignoredSendOpcodes[opcode] || debugPackets {
-			log.Printf("[SEND] 0x%04X [%s] len=%d data=%X", opcode, maple.SendOpcodeName(opcode), len(p), p)
+			log.Printf("[SEND] 0x%04X [%s] len=%d data=%X", opcode, maple.SendOpcodeName(opcode), len(p), []byte(p))
 		}
 	}
 

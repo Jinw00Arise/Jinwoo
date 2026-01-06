@@ -15,5 +15,6 @@ require (
 	github.com/jackc/pgx/v5 v5.3.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	golang.org/x/text v0.7.0 // indirect
 )

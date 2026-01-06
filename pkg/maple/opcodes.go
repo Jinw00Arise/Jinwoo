@@ -114,7 +114,7 @@ const (
 	RecvUserCharacterInfoRequest   uint16 = 109
 	// RecvUserActivatePetRequest  uint16 = 110
 	// RecvUserTemporaryStatUpdateRequest uint16 = 111
-	// RecvUserPortalScriptRequest uint16 = 112
+	RecvUserPortalScriptRequest    uint16 = 112
 	// RecvUserPortalTeleportRequest uint16 = 113
 	// RecvUserMapTransferRequest  uint16 = 114
 	// RecvUserAntiMacroItemUseRequest uint16 = 115
@@ -252,7 +252,7 @@ const (
 	// Reactor opcodes
 	// RecvReactorHit              uint16 = 249
 	// RecvReactorTouch            uint16 = 250
-	// RecvRequireFieldObstacleStatus uint16 = 251
+	RecvRequireFieldObstacleStatus uint16 = 251
 
 	// Event field opcodes
 	// RecvEventStart              uint16 = 254
@@ -269,7 +269,7 @@ const (
 
 	// Party match opcodes
 	// RecvINVITE_PARTY_MATCH      uint16 = 266
-	// RecvCANCEL_INVITE_PARTY_MATCH uint16 = 267
+	RecvCancelInvitePartyMatch     uint16 = 267
 
 	// RecvRequestFootHoldInfo     uint16 = 269
 	// RecvFootHoldInfo            uint16 = 270
@@ -579,7 +579,7 @@ const (
 	SendUserQuestResult      uint16 = 242
 	// SendNotifyHPDecByField uint16 = 243
 	// SendUserPetSkillChanged uint16 = 244
-	// SendUserBalloonMsg    uint16 = 245
+	SendUserBalloonMsg       uint16 = 245
 	// SendPlayEventSound    uint16 = 246
 	// SendPlayMinigameSound uint16 = 247
 	// SendUserMakerResult   uint16 = 248
@@ -805,6 +805,7 @@ var recvOpcodeNames = map[uint16]string{
 	RecvUserChangeStatRequest:      "UserChangeStatRequest",
 	RecvUserCharacterInfoRequest:   "UserCharacterInfoRequest",
 	RecvUserQuestRequest:           "UserQuestRequest",
+	RecvUserPortalScriptRequest:    "UserPortalScriptRequest",
 	RecvFuncKeyMappedModified:      "FuncKeyMappedModified",
 	RecvQuickslotKeyMappedModified: "QuickslotKeyMappedModified",
 	RecvUpdateScreenSetting:        "UpdateScreenSetting",
@@ -814,6 +815,10 @@ var recvOpcodeNames = map[uint16]string{
 	RecvNpcMove:                    "NpcMove",
 	// Drop
 	RecvDropPickUpRequest:          "DropPickUpRequest",
+	// Field
+	RecvRequireFieldObstacleStatus: "RequireFieldObstacleStatus",
+	// Party
+	RecvCancelInvitePartyMatch:     "CancelInvitePartyMatch",
 }
 
 var sendOpcodeNames = map[uint16]string{
@@ -827,16 +832,20 @@ var sendOpcodeNames = map[uint16]string{
 	SendDeleteCharacterResult:    "DeleteCharacterResult",
 	SendMigrateCommand:           "MigrateCommand",
 	SendAliveReq:                 "AliveReq",
+	SendMessage:                  "Message",
 	SendSetField:                 "SetField",
 	SendUserEnterField:           "UserEnterField",
 	SendUserLeaveField:           "UserLeaveField",
 	SendUserMove:                 "UserMove",
 	SendUserChat:                 "UserChat",
+	SendUserQuestResult:          "UserQuestResult",
+	SendScriptMessage:            "ScriptMessage",
 	SendMobEnterField:            "MobEnterField",
 	SendMobLeaveField:            "MobLeaveField",
 	SendMobMove:                  "MobMove",
 	SendNpcEnterField:            "NpcEnterField",
 	SendNpcLeaveField:            "NpcLeaveField",
+	SendNpcChangeController:      "NpcChangeController",
 	SendDropEnterField:           "DropEnterField",
 	SendDropLeaveField:           "DropLeaveField",
 }

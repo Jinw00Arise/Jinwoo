@@ -39,3 +39,6 @@ Thumbs.db
 
 # Env
 .env
+
+# Game Data
+/data

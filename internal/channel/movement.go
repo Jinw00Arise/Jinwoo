@@ -21,12 +21,11 @@ type MoveAction struct {
 
 // MovePath represents a complete movement path
 type MovePath struct {
-	X        int16
-	Y        int16
-	VX       int16
-	VY       int16
-	MapID    int32
-	Actions  []MoveAction
+	X       int16
+	Y       int16
+	VX      int16
+	VY      int16
+	Actions []MoveAction
 }
 
 // DecodeMovePath decodes a movement path from a packet
