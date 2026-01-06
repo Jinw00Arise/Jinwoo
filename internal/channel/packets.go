@@ -757,3 +757,85 @@ func UserEffectPacket(effectType byte) packet.Packet {
 	p.WriteByte(effectType)
 	return p
 }
+
+// Drop enter types
+const (
+	DropEnterJustShowing byte = 0 // Drop just appears (instant)
+	DropEnterCreate      byte = 1 // Drop falls from source (mob death, etc)
+	DropEnterOnFoothold  byte = 2 // Drop already on field when entering
+	DropEnterFadingOut   byte = 3 // Drop fading out (player drop animation)
+)
+
+// Drop leave types
+const (
+	DropLeaveTimeout     byte = 0 // Drop expired/timeout
+	DropLeaveScreenScroll byte = 1 // Screen scrolled away
+	DropLeavePickUp      byte = 2 // Drop picked up by player
+	DropLeavePickUpByMob byte = 3 // Drop picked up by mob
+	DropLeaveExplode     byte = 4 // Drop exploded/destroyed
+	DropLeavePetPickUp   byte = 5 // Drop picked up by pet
+)
+
+// DropEnterFieldPacket creates a packet to spawn a drop on the ground
+func DropEnterFieldPacket(drop *FieldDrop, startX, startY int16, enterType byte) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendDropEnterField)
+	
+	p.WriteByte(enterType)            // nEnterType
+	p.WriteInt(drop.ObjectID)         // DROP->dwId
+	p.WriteByte(0)                    // DROP->bIsMoney (0 = item, 1 = meso)
+	p.WriteInt(uint32(drop.ItemID))   // DROP->nInfo (itemId or meso amount)
+	p.WriteInt(uint32(drop.OwnerID))  // DROP->dwOwnerID
+	p.WriteByte(2)                    // DROP->nOwnType (0=none, 1=party, 2=owner, 3=explosive)
+	p.WriteShort(uint16(drop.X))      // drop position x
+	p.WriteShort(uint16(drop.Y))      // drop position y
+	p.WriteInt(0)                     // DROP->dwSourceID (0 for player drop)
+	
+	// For types other than ON_THE_FOOTHOLD (2), need source position and delay
+	if enterType != DropEnterOnFoothold {
+		p.WriteShort(uint16(startX))  // source x
+		p.WriteShort(uint16(startY))  // source y
+		p.WriteShort(0)               // tDelay
+	}
+	
+	// For items (not meso), write expiration time
+	writeFileTime(&p, time.Time{})    // m_dateExpire
+	
+	p.WriteByte(0)                    // bByPet (false for user drops)
+	p.WriteByte(0)                    // extra bool (IWzGr2DLayer::Putz)
+	
+	return p
+}
+
+// DropLeaveFieldPacket creates a packet to remove a drop from the field
+func DropLeaveFieldPacket(objectID uint32, leaveType byte, pickerID uint, petIndex int) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendDropLeaveField)
+	
+	p.WriteByte(leaveType)            // nLeaveType
+	p.WriteInt(objectID)              // dwDropID
+	
+	switch leaveType {
+	case DropLeavePickUp, DropLeavePickUpByMob:
+		p.WriteInt(uint32(pickerID))  // dwPickUpID
+	case DropLeavePetPickUp:
+		p.WriteInt(uint32(pickerID))  // dwPickUpID (character id)
+		p.WriteInt(uint32(petIndex))  // pet index
+	case DropLeaveExplode:
+		p.WriteShort(0)               // delay
+	// DropLeaveTimeout and DropLeaveScreenScroll have no extra data
+	}
+	
+	return p
+}
+
+// MessagePickUpItemPacket creates a packet to show item pickup notification
+func MessagePickUpItemPacket(itemID int32, quantity int32) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMessage)
+	
+	// Message type for drop pickup
+	p.WriteByte(0)                    // DropPickUp message type
+	p.WriteByte(0)                    // ITEM_BUNDLE (item, not meso)
+	p.WriteInt(uint32(itemID))        // nItemID
+	p.WriteInt(uint32(quantity))      // quantity
+	
+	return p
+}

@@ -23,6 +23,17 @@ type QuestRecord struct {
 	CompleteTime int64  // Unix nano for completed quests
 }
 
+// FieldDrop represents an item dropped on the ground
+type FieldDrop struct {
+	ObjectID uint32
+	ItemID   int32
+	Quantity int16
+	X        int16
+	Y        int16
+	OwnerID  uint   // Character ID who dropped it
+	DropTime int64  // Unix timestamp
+}
+
 type Handler struct {
 	conn            *network.Connection
 	config          *config.ChannelConfig
@@ -33,9 +44,13 @@ type Handler struct {
 	fieldKey        byte
 	nextObjectID    uint32
 	spawnedNPCs     map[uint32]int           // object ID -> NPC template ID
+	fieldDrops      map[uint32]*FieldDrop    // object ID -> drop
 	npcConversation *script.NPCConversation
 	activeQuests    map[uint16]*QuestRecord  // questID -> record (in progress)
 	completedQuests map[uint16]*QuestRecord  // questID -> record (completed)
+	// Player position (transient, updated from movement packets)
+	posX            int16
+	posY            int16
 }
 
 func NewHandler(conn *network.Connection, cfg *config.ChannelConfig, characters *repository.CharacterRepository, inventories *repository.InventoryRepository) *Handler {
@@ -46,6 +61,7 @@ func NewHandler(conn *network.Connection, cfg *config.ChannelConfig, characters 
 		inventories:     inventories,
 		activeQuests:    make(map[uint16]*QuestRecord),
 		completedQuests: make(map[uint16]*QuestRecord),
+		fieldDrops:      make(map[uint32]*FieldDrop),
 	}
 }
 
@@ -75,6 +91,8 @@ func (h *Handler) Handle(p packet.Packet) {
 		h.handleUserChangeSlotPositionRequest(reader)
 	case maple.RecvUserStatChangeItemUseRequest:
 		h.handleUserStatChangeItemUseRequest(reader)
+	case maple.RecvDropPickUpRequest:
+		h.handleDropPickUpRequest(reader)
 	case maple.RecvAliveAck, maple.RecvUpdateScreenSetting:
 		// Keep-alive and screen settings, ignore
 	case maple.RecvNpcMove, maple.RecvRequireFieldObstacleStatus, maple.RecvCancelInvitePartyMatch, maple.RecvClientDumpLog, maple.RecvUserEmotion:
@@ -100,6 +118,19 @@ func (h *Handler) handleMigrateIn(reader *packet.Reader) {
 	h.fieldKey = 1 // Initial field key, increments on field change
 	h.nextObjectID = 1000 // Start object IDs at 1000
 	h.spawnedNPCs = make(map[uint32]int)
+	h.fieldDrops = make(map[uint32]*FieldDrop)
+	
+	// Initialize position from spawn point
+	dm := wz.GetInstance()
+	if dm != nil {
+		if mapData, err := dm.GetMapData(int(char.MapID)); err == nil {
+			if int(char.SpawnPoint) < len(mapData.Portals) {
+				portal := mapData.Portals[char.SpawnPoint]
+				h.posX = int16(portal.X)
+				h.posY = int16(portal.Y)
+			}
+		}
+	}
 	
 	// Initialize and load inventory
 	h.inventory = inventory.NewManager(char.ID, h.inventories)
@@ -108,7 +139,7 @@ func (h *Handler) handleMigrateIn(reader *packet.Reader) {
 		// Continue anyway, inventory will just be empty
 	}
 	
-	log.Printf("Player %s (id=%d) entering game", char.Name, char.ID)
+	log.Printf("Player %s (id=%d) entering game at (%d, %d)", char.Name, char.ID, h.posX, h.posY)
 
 	// Send SetField to spawn the player
 	if err := h.conn.Write(SetFieldPacketFull(char, int(h.config.ChannelID), h.fieldKey, h.getQuestData(), h.getInventoryData())); err != nil {
@@ -249,9 +280,10 @@ func (h *Handler) handleUserMove(reader *packet.Reader) {
 		return
 	}
 
-	// Update character position (MapID stays the same - it's managed by transfer)
-	// TODO: Add X, Y fields to Character model and update here
-	// x, y := movePath.GetFinalPosition()
+	// Update character position from movement path final position
+	finalX, finalY := movePath.GetFinalPosition()
+	h.posX = finalX
+	h.posY = finalY
 
 	// TODO: Broadcast to other players in the field
 	// field.broadcastPacket(UserRemote.move(user, movePath), user)
@@ -356,6 +388,8 @@ func (h *Handler) transferToMap(mapID int32, portalName string) {
 	for i, p := range destMapData.Portals {
 		if p.Name == portalName || (portalName == "" && p.Type == 0) {
 			spawnPoint = byte(i)
+			h.posX = int16(p.X)
+			h.posY = int16(p.Y)
 			break
 		}
 	}
@@ -368,8 +402,9 @@ func (h *Handler) transferToMap(mapID int32, portalName string) {
 	// Increment field key
 	h.fieldKey++
 
-	// Clear spawned NPCs from old map
+	// Clear spawned NPCs and drops from old map
 	h.spawnedNPCs = make(map[uint32]int)
+	h.fieldDrops = make(map[uint32]*FieldDrop)
 	h.nextObjectID = 1000
 
 	// Send SetField for new map (with quest and inventory data preserved)
@@ -968,7 +1003,43 @@ func (h *Handler) handleUserChangeSlotPositionRequest(reader *packet.Reader) {
 	log.Printf("[Inventory] %s move/drop: type=%d src=%d dest=%d qty=%d", 
 		h.character.Name, invType, srcSlot, destSlot, quantity)
 	
-	// Handle the move/drop
+	// Check if this is a drop (destSlot = 0)
+	if destSlot == 0 {
+		// Get item info before removing
+		item := h.inventory.GetItemBySlot(invType, srcSlot)
+		if item == nil {
+			log.Printf("[Inventory] Drop failed: no item at slot %d", srcSlot)
+			h.conn.Write(EnableActionsPacket())
+			return
+		}
+		
+		itemID := item.ItemID
+		dropQty := quantity
+		if dropQty <= 0 || dropQty > item.Quantity {
+			dropQty = item.Quantity
+		}
+		
+		// Remove from inventory
+		operations, err := h.inventory.MoveItem(invType, srcSlot, destSlot, quantity)
+		if err != nil {
+			log.Printf("[Inventory] Drop failed: %v", err)
+			h.conn.Write(EnableActionsPacket())
+			return
+		}
+		
+		// Send inventory update
+		if len(operations) > 0 {
+			if err := h.conn.Write(inventory.InventoryOperationPacket(operations, true)); err != nil {
+				log.Printf("[Inventory] Failed to send inventory update: %v", err)
+			}
+		}
+		
+		// Spawn the drop on the ground
+		h.spawnDrop(itemID, dropQty)
+		return
+	}
+	
+	// Handle the move
 	operations, err := h.inventory.MoveItem(invType, srcSlot, destSlot, quantity)
 	if err != nil {
 		log.Printf("[Inventory] Move failed: %v", err)
@@ -982,6 +1053,94 @@ func (h *Handler) handleUserChangeSlotPositionRequest(reader *packet.Reader) {
 			log.Printf("[Inventory] Failed to send inventory update: %v", err)
 		}
 	}
+}
+
+// spawnDrop creates a drop on the ground near the player
+func (h *Handler) spawnDrop(itemID int32, quantity int16) {
+	if h.character == nil {
+		return
+	}
+	
+	// Create drop object
+	objectID := h.nextObjectID
+	h.nextObjectID++
+	
+	// Drop at player's exact position - client handles the visual falling
+	// The drop lands where the player is standing
+	drop := &FieldDrop{
+		ObjectID: objectID,
+		ItemID:   itemID,
+		Quantity: quantity,
+		X:        h.posX,
+		Y:        h.posY,
+		OwnerID:  h.character.ID,
+		DropTime: time.Now().Unix(),
+	}
+	
+	h.fieldDrops[objectID] = drop
+	
+	log.Printf("[Drop] Spawned drop %d: item %d x%d at (%d, %d)", objectID, itemID, quantity, drop.X, drop.Y)
+	
+	// Send drop packet to client
+	// Type 0 (JUST_SHOWING) = instant appear at position (best for player drops)
+	// Type 1 (CREATE) = falls from source to destination (for mob drops)
+	// Type 3 (FADING_OUT) = disappears immediately (quest items)
+	if err := h.conn.Write(DropEnterFieldPacket(drop, h.posX, h.posY, DropEnterCreate)); err != nil {
+		log.Printf("[Drop] Failed to send drop packet: %v", err)
+	}
+}
+
+// handleDropPickUpRequest handles picking up dropped items
+func (h *Handler) handleDropPickUpRequest(reader *packet.Reader) {
+	if h.character == nil || h.inventory == nil {
+		return
+	}
+	
+	_ = reader.ReadByte()    // fieldKey
+	_ = reader.ReadInt()     // tTick
+	_ = reader.ReadShort()   // ptPickup.x
+	_ = reader.ReadShort()   // ptPickup.y
+	objectID := reader.ReadInt()
+	_ = reader.ReadInt()     // dwCrc
+	
+	log.Printf("[Drop] %s picking up drop %d", h.character.Name, objectID)
+	
+	// Find the drop
+	drop, exists := h.fieldDrops[uint32(objectID)]
+	if !exists {
+		log.Printf("[Drop] Drop %d not found", objectID)
+		h.conn.Write(EnableActionsPacket())
+		return
+	}
+	
+	// Add item to inventory
+	operations, err := h.inventory.AddItem(drop.ItemID, drop.Quantity)
+	if err != nil {
+		log.Printf("[Drop] Failed to add item to inventory: %v", err)
+		// Send pickup failed message
+		h.conn.Write(EnableActionsPacket())
+		return
+	}
+	
+	// Send inventory update
+	if len(operations) > 0 {
+		if err := h.conn.Write(inventory.InventoryOperationPacket(operations, true)); err != nil {
+			log.Printf("[Drop] Failed to send inventory update: %v", err)
+		}
+	}
+	
+	// Send pickup message
+	if err := h.conn.Write(MessagePickUpItemPacket(drop.ItemID, int32(drop.Quantity))); err != nil {
+		log.Printf("[Drop] Failed to send pickup message: %v", err)
+	}
+	
+	// Remove drop from field
+	if err := h.conn.Write(DropLeaveFieldPacket(uint32(objectID), DropLeavePickUp, h.character.ID, 0)); err != nil {
+		log.Printf("[Drop] Failed to send drop leave packet: %v", err)
+	}
+	
+	delete(h.fieldDrops, uint32(objectID))
+	log.Printf("[Drop] %s picked up item %d x%d", h.character.Name, drop.ItemID, drop.Quantity)
 }
 
 // handleUserStatChangeItemUseRequest handles using consumable items (HP/MP potions, etc.)
