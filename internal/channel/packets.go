@@ -202,3 +202,15 @@ func writeFileTime(p *packet.Packet, t time.Time) {
 	ft := uint64(t.UnixNano()/100) + unixToFileTime
 	p.WriteLong(ft)
 }
+
+// UserChatPacket creates a chat message packet
+func UserChatPacket(characterID uint, message string, onlyBalloon bool, isAdmin bool) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendUserChat)
+	p.WriteInt(uint32(characterID))
+	p.WriteBool(isAdmin) // GM chat (white background)
+	p.WriteString(message)
+	p.WriteBool(onlyBalloon) // Only show balloon, not in chat log
+	p.WriteByte(0)           // nSpeechBubbleFlags (0 = normal)
+	p.WriteByte(0)           // nCharacterInfoFlags (0 = normal)
+	return p
+}

@@ -35,6 +35,8 @@ func (h *Handler) Handle(p packet.Packet) {
 		h.handleMigrateIn(reader)
 	case maple.RecvUserMove:
 		h.handleUserMove(reader)
+	case maple.RecvUserChat:
+		h.handleUserChat(reader)
 	case maple.RecvAliveAck, maple.RecvUpdateScreenSetting:
 		// Keep-alive and screen settings, ignore
 	default:
@@ -100,5 +102,24 @@ func (h *Handler) handleUserMove(reader *packet.Reader) {
 
 	// TODO: Broadcast to other players in the field
 	// field.broadcastPacket(UserRemote.move(user, movePath), user)
+}
+
+func (h *Handler) handleUserChat(reader *packet.Reader) {
+	if h.character == nil {
+		return
+	}
+
+	_ = reader.ReadInt() // tSentAt (tick count)
+	message := reader.ReadString()
+	onlyBalloon := reader.ReadBool() // Show only balloon (no text in chat)
+
+	log.Printf("[Chat] %s: %s", h.character.Name, message)
+
+	// Send chat back to the user (and would broadcast to others in the field)
+	if err := h.conn.Write(UserChatPacket(h.character.ID, message, onlyBalloon, false)); err != nil {
+		log.Printf("Failed to send chat: %v", err)
+	}
+
+	// TODO: Broadcast to other players in the field
 }
 
