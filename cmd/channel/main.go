@@ -37,7 +37,8 @@ func main() {
 	log.Println("Database connected")
 
 	characters := repository.NewCharacterRepository(db)
-	server := channel.NewServer(cfg, characters)
+	inventories := repository.NewInventoryRepository(db)
+	server := channel.NewServer(cfg, characters, inventories)
 
 	if err := server.Start(); err != nil {
 		log.Fatalf("Server error: %v", err)

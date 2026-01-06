@@ -10,13 +10,14 @@ import (
 )
 
 type Server struct {
-	config     *config.ChannelConfig
-	characters *repository.CharacterRepository
-	listener   net.Listener
+	config      *config.ChannelConfig
+	characters  *repository.CharacterRepository
+	inventories *repository.InventoryRepository
+	listener    net.Listener
 }
 
-func NewServer(cfg *config.ChannelConfig, characters *repository.CharacterRepository) *Server {
-	return &Server{config: cfg, characters: characters}
+func NewServer(cfg *config.ChannelConfig, characters *repository.CharacterRepository, inventories *repository.InventoryRepository) *Server {
+	return &Server{config: cfg, characters: characters, inventories: inventories}
 }
 
 func (s *Server) Start() error {
@@ -55,7 +56,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		return
 	}
 
-	handler := NewHandler(c, s.config, s.characters)
+	handler := NewHandler(c, s.config, s.characters, s.inventories)
 
 	for {
 		p, err := c.Read()

@@ -7,6 +7,8 @@ import (
 	"github.com/Jinw00Arise/Jinwoo/config"
 	"github.com/Jinw00Arise/Jinwoo/internal/database/models"
 	"github.com/Jinw00Arise/Jinwoo/internal/database/repository"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/exp"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/inventory"
 	"github.com/Jinw00Arise/Jinwoo/internal/network"
 	"github.com/Jinw00Arise/Jinwoo/internal/packet"
 	"github.com/Jinw00Arise/Jinwoo/internal/script"
@@ -25,7 +27,9 @@ type Handler struct {
 	conn            *network.Connection
 	config          *config.ChannelConfig
 	characters      *repository.CharacterRepository
+	inventories     *repository.InventoryRepository
 	character       *models.Character
+	inventory       *inventory.Manager
 	fieldKey        byte
 	nextObjectID    uint32
 	spawnedNPCs     map[uint32]int           // object ID -> NPC template ID
@@ -34,11 +38,12 @@ type Handler struct {
 	completedQuests map[uint16]*QuestRecord  // questID -> record (completed)
 }
 
-func NewHandler(conn *network.Connection, cfg *config.ChannelConfig, characters *repository.CharacterRepository) *Handler {
+func NewHandler(conn *network.Connection, cfg *config.ChannelConfig, characters *repository.CharacterRepository, inventories *repository.InventoryRepository) *Handler {
 	return &Handler{
 		conn:            conn,
 		config:          cfg,
 		characters:      characters,
+		inventories:     inventories,
 		activeQuests:    make(map[uint16]*QuestRecord),
 		completedQuests: make(map[uint16]*QuestRecord),
 	}
@@ -66,6 +71,10 @@ func (h *Handler) Handle(p packet.Packet) {
 		h.handleUserPortalScriptRequest(reader)
 	case maple.RecvUserChangeStatRequest:
 		h.handleUserChangeStatRequest(reader)
+	case maple.RecvUserChangeSlotPositionRequest:
+		h.handleUserChangeSlotPositionRequest(reader)
+	case maple.RecvUserStatChangeItemUseRequest:
+		h.handleUserStatChangeItemUseRequest(reader)
 	case maple.RecvAliveAck, maple.RecvUpdateScreenSetting:
 		// Keep-alive and screen settings, ignore
 	case maple.RecvNpcMove, maple.RecvRequireFieldObstacleStatus, maple.RecvCancelInvitePartyMatch, maple.RecvClientDumpLog, maple.RecvUserEmotion:
@@ -91,10 +100,18 @@ func (h *Handler) handleMigrateIn(reader *packet.Reader) {
 	h.fieldKey = 1 // Initial field key, increments on field change
 	h.nextObjectID = 1000 // Start object IDs at 1000
 	h.spawnedNPCs = make(map[uint32]int)
+	
+	// Initialize and load inventory
+	h.inventory = inventory.NewManager(char.ID, h.inventories)
+	if err := h.inventory.Load(); err != nil {
+		log.Printf("Failed to load inventory for %d: %v", characterID, err)
+		// Continue anyway, inventory will just be empty
+	}
+	
 	log.Printf("Player %s (id=%d) entering game", char.Name, char.ID)
 
 	// Send SetField to spawn the player
-	if err := h.conn.Write(SetFieldPacketWithQuests(char, int(h.config.ChannelID), h.fieldKey, h.getQuestData())); err != nil {
+	if err := h.conn.Write(SetFieldPacketFull(char, int(h.config.ChannelID), h.fieldKey, h.getQuestData(), h.getInventoryData())); err != nil {
 		log.Printf("Failed to send SetField: %v", err)
 		return
 	}
@@ -187,6 +204,22 @@ func (h *Handler) getQuestData() *QuestData {
 	}
 	
 	return qd
+}
+
+// getInventoryData builds inventory data for SetField packet
+func (h *Handler) getInventoryData() *InventoryData {
+	if h.inventory == nil {
+		return nil
+	}
+	
+	return &InventoryData{
+		Equipped: h.inventory.GetItemsByType(models.InventoryEquipped),
+		Equip:    h.inventory.GetItemsByType(models.InventoryEquip),
+		Consume:  h.inventory.GetItemsByType(models.InventoryConsume),
+		Install:  h.inventory.GetItemsByType(models.InventoryInstall),
+		Etc:      h.inventory.GetItemsByType(models.InventoryEtc),
+		Cash:     h.inventory.GetItemsByType(models.InventoryCash),
+	}
 }
 
 func (h *Handler) handleUserMove(reader *packet.Reader) {
@@ -339,8 +372,8 @@ func (h *Handler) transferToMap(mapID int32, portalName string) {
 	h.spawnedNPCs = make(map[uint32]int)
 	h.nextObjectID = 1000
 
-	// Send SetField for new map (with quest data preserved)
-	if err := h.conn.Write(SetFieldPacketWithQuests(h.character, int(h.config.ChannelID), h.fieldKey, h.getQuestData())); err != nil {
+	// Send SetField for new map (with quest and inventory data preserved)
+	if err := h.conn.Write(SetFieldPacketFull(h.character, int(h.config.ChannelID), h.fieldKey, h.getQuestData(), h.getInventoryData())); err != nil {
 		log.Printf("[Transfer] Failed to send SetField: %v", err)
 		return
 	}
@@ -434,6 +467,13 @@ func (h *Handler) runQuestScript(scriptContent string, questID, npcID int) {
 		h.conn.Write(EnableActionsPacket())
 		return
 	}
+
+	// Set inventory manager for item operations
+	conv.Inventory = h.inventory
+	
+	// Set EXP rate multipliers from config
+	conv.ExpRate = h.config.ExpRate
+	conv.QuestExpRate = h.config.QuestExpRate
 
 	// Set quest callbacks for server-side tracking
 	conv.OnQuestStart = func(qID uint16) {
@@ -641,23 +681,72 @@ func (h *Handler) giveQuestRewards(rewards *wz.QuestActData, isStart bool) {
 		return
 	}
 	
-	// Give EXP
+	// Give EXP (with quest EXP rate multiplier)
 	if rewards.Exp > 0 {
-		h.character.EXP += rewards.Exp
-		// TODO: Check for level up
+		expGain := int32(float64(rewards.Exp) * h.config.QuestExpRate)
+		h.character.EXP += expGain
 		
-		// Send stat update
-		stats := map[uint32]int64{StatEXP: int64(h.character.EXP)}
-		if err := h.conn.Write(StatChangedPacket(true, stats)); err != nil {
-			log.Printf("Failed to send EXP stat change: %v", err)
+		// Check for level up
+		oldLevel := h.character.Level
+		newLevel, newExp, levelsGained := exp.CalculateLevelUp(h.character.Level, h.character.EXP)
+		
+		if levelsGained > 0 {
+			// Character leveled up!
+			h.character.Level = newLevel
+			h.character.EXP = newExp
+			
+			// Grant AP and SP per level (5 AP, 3 SP for beginners)
+			apGain := int16(levelsGained * 5)
+			spGain := int16(levelsGained * 3)
+			h.character.AP += apGain
+			h.character.SP += spGain
+			
+			// Increase MaxHP and MaxMP (simplified formula)
+			for i := 0; i < levelsGained; i++ {
+				h.character.MaxHP += 12 + int32(h.character.Level-byte(i))/5
+				h.character.MaxMP += 8 + int32(h.character.Level-byte(i))/5
+			}
+			
+			// Fully heal on level up
+			h.character.HP = h.character.MaxHP
+			h.character.MP = h.character.MaxMP
+			
+			log.Printf("[Quest] %s leveled up! %d -> %d (gained %d levels)", 
+				h.character.Name, oldLevel, newLevel, levelsGained)
+			
+			// Send stat update for all level-up related stats
+			stats := map[uint32]int64{
+				StatLevel: int64(h.character.Level),
+				StatHP:    int64(h.character.HP),
+				StatMaxHP: int64(h.character.MaxHP),
+				StatMP:    int64(h.character.MP),
+				StatMaxMP: int64(h.character.MaxMP),
+				StatAP:    int64(h.character.AP),
+				StatSP:    int64(h.character.SP),
+				StatEXP:   int64(h.character.EXP),
+			}
+			if err := h.conn.Write(StatChangedPacket(true, stats)); err != nil {
+				log.Printf("Failed to send level up stat change: %v", err)
+			}
+			
+			// Send level up effect
+			if err := h.conn.Write(UserEffectPacket(EffectLevelUp)); err != nil {
+				log.Printf("Failed to send level up effect: %v", err)
+			}
+		} else {
+			// No level up, just send EXP update
+			stats := map[uint32]int64{StatEXP: int64(h.character.EXP)}
+			if err := h.conn.Write(StatChangedPacket(true, stats)); err != nil {
+				log.Printf("Failed to send EXP stat change: %v", err)
+			}
 		}
 		
-		// Send EXP notification
-		if err := h.conn.Write(MessageIncExpPacket(rewards.Exp, 0, true, true)); err != nil {
+		// Send EXP notification (show the multiplied amount)
+		if err := h.conn.Write(MessageIncExpPacket(expGain, 0, true, true)); err != nil {
 			log.Printf("Failed to send EXP message: %v", err)
 		}
 		
-		log.Printf("[Quest] Gave %d EXP to %s", rewards.Exp, h.character.Name)
+		log.Printf("[Quest] Gave %d EXP to %s (base: %d, rate: %.1fx)", expGain, h.character.Name, rewards.Exp, h.config.QuestExpRate)
 	}
 	
 	// Give Meso
@@ -803,6 +892,13 @@ func (h *Handler) handleUserSelectNpc(reader *packet.Reader) {
 		return
 	}
 
+	// Set inventory manager for item operations
+	conv.Inventory = h.inventory
+	
+	// Set EXP rate multipliers from config
+	conv.ExpRate = h.config.ExpRate
+	conv.QuestExpRate = h.config.QuestExpRate
+
 	// Run script in goroutine
 	go conv.Run()
 }
@@ -855,5 +951,138 @@ func (h *Handler) handleUserScriptMessageAnswer(reader *packet.Reader) {
 	}
 
 	conv.HandleResponse(script.NPCMessageType(msgType), selection, text, false)
+}
+
+// handleUserChangeSlotPositionRequest handles item moving/dropping
+func (h *Handler) handleUserChangeSlotPositionRequest(reader *packet.Reader) {
+	if h.character == nil || h.inventory == nil {
+		return
+	}
+	
+	_ = reader.ReadInt()     // tTick (timestamp)
+	invType := models.InventoryType(reader.ReadByte())
+	srcSlot := int16(reader.ReadShort())
+	destSlot := int16(reader.ReadShort())
+	quantity := int16(reader.ReadShort())
+	
+	log.Printf("[Inventory] %s move/drop: type=%d src=%d dest=%d qty=%d", 
+		h.character.Name, invType, srcSlot, destSlot, quantity)
+	
+	// Handle the move/drop
+	operations, err := h.inventory.MoveItem(invType, srcSlot, destSlot, quantity)
+	if err != nil {
+		log.Printf("[Inventory] Move failed: %v", err)
+		h.conn.Write(EnableActionsPacket())
+		return
+	}
+	
+	// Send inventory updates to client
+	if len(operations) > 0 {
+		if err := h.conn.Write(inventory.InventoryOperationPacket(operations, true)); err != nil {
+			log.Printf("[Inventory] Failed to send inventory update: %v", err)
+		}
+	}
+}
+
+// handleUserStatChangeItemUseRequest handles using consumable items (HP/MP potions, etc.)
+func (h *Handler) handleUserStatChangeItemUseRequest(reader *packet.Reader) {
+	if h.character == nil || h.inventory == nil {
+		return
+	}
+	
+	_ = reader.ReadInt() // tTick (timestamp)
+	slot := int16(reader.ReadShort())
+	itemID := reader.ReadInt()
+	
+	log.Printf("[Inventory] %s use item: slot=%d itemID=%d", h.character.Name, slot, itemID)
+	
+	// Verify the item exists at that slot
+	item := h.inventory.GetItemBySlot(models.InventoryConsume, slot)
+	if item == nil || item.ItemID != int32(itemID) {
+		log.Printf("[Inventory] Item mismatch or not found at slot %d", slot)
+		h.conn.Write(EnableActionsPacket())
+		return
+	}
+	
+	// Get item effects (HP/MP recovery amounts)
+	hpRecover, mpRecover := h.getItemRecoveryAmounts(int32(itemID))
+	
+	// Use the item (decrements quantity)
+	operation, err := h.inventory.UseItem(models.InventoryConsume, slot)
+	if err != nil {
+		log.Printf("[Inventory] Use item failed: %v", err)
+		h.conn.Write(EnableActionsPacket())
+		return
+	}
+	
+	// Apply item effects
+	statChanges := make(map[uint32]int64)
+	
+	if hpRecover > 0 {
+		h.character.HP += hpRecover
+		if h.character.HP > h.character.MaxHP {
+			h.character.HP = h.character.MaxHP
+		}
+		statChanges[StatHP] = int64(h.character.HP)
+		log.Printf("[Inventory] %s recovered %d HP (now %d/%d)", 
+			h.character.Name, hpRecover, h.character.HP, h.character.MaxHP)
+	}
+	
+	if mpRecover > 0 {
+		h.character.MP += mpRecover
+		if h.character.MP > h.character.MaxMP {
+			h.character.MP = h.character.MaxMP
+		}
+		statChanges[StatMP] = int64(h.character.MP)
+		log.Printf("[Inventory] %s recovered %d MP (now %d/%d)", 
+			h.character.Name, mpRecover, h.character.MP, h.character.MaxMP)
+	}
+	
+	// Send inventory update
+	if operation != nil {
+		if err := h.conn.Write(inventory.InventoryOperationPacket([]*inventory.InventoryOperation{operation}, true)); err != nil {
+			log.Printf("[Inventory] Failed to send inventory update: %v", err)
+		}
+	}
+	
+	// Send stat update if HP/MP changed
+	if len(statChanges) > 0 {
+		if err := h.conn.Write(StatChangedPacket(true, statChanges)); err != nil {
+			log.Printf("[Inventory] Failed to send stat update: %v", err)
+		}
+	}
+}
+
+// getItemRecoveryAmounts returns HP and MP recovery amounts for a consumable item
+// Loads recovery data from WZ files (Item.wz/Consume/xxxx.img.xml -> spec node)
+func (h *Handler) getItemRecoveryAmounts(itemID int32) (hpRecover, mpRecover int32) {
+	dm := wz.GetInstance()
+	if dm == nil {
+		log.Printf("[Item] WZ DataManager not initialized!")
+		return 0, 0
+	}
+	
+	// Get item data from WZ
+	hp, mp, hpR, mpR := dm.GetItemRecovery(itemID)
+	
+	// Debug: log the raw values
+	log.Printf("[Item] WZ data for %d: hp=%d, mp=%d, hpR=%d, mpR=%d", itemID, hp, mp, hpR, mpR)
+	
+	// Calculate flat recovery
+	hpRecover = hp
+	mpRecover = mp
+	
+	// Add percentage-based recovery if applicable
+	if hpR > 0 && h.character != nil {
+		hpRecover += (h.character.MaxHP * hpR) / 100
+	}
+	if mpR > 0 && h.character != nil {
+		mpRecover += (h.character.MaxMP * mpR) / 100
+	}
+	
+	// Log the final recovery values
+	log.Printf("[Item] %d final recovery: HP=%d, MP=%d", itemID, hpRecover, mpRecover)
+	
+	return hpRecover, mpRecover
 }
 

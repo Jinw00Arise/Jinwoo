@@ -7,11 +7,15 @@ import (
 
 // DataManager manages all WZ data loading and caching
 type DataManager struct {
-	wzPath string
+	wzPath   string
+	basePath string // Alias for wzPath, used by item loader
 	
 	// Cached data
 	maps       map[int]*MapData
 	mapsMu     sync.RWMutex
+	
+	items      map[int32]*ItemData
+	mu         sync.RWMutex // For items
 	
 	npcStrings *NPCStrings
 	mobStrings *MobStrings
@@ -34,13 +38,16 @@ func Init(wzPath string) error {
 	once.Do(func() {
 		instance = &DataManager{
 			wzPath:      wzPath,
+			basePath:    wzPath,
 			maps:        make(map[int]*MapData),
+			items:       make(map[int32]*ItemData),
 			questActs:   make(map[int]*QuestAct),
 			questChecks: make(map[int]*QuestCheck),
 			questInfo:   make(map[int]*QuestInfo),
 		}
 		instance.loadStrings()
 		instance.loadQuests()
+		instance.LoadAllItemStrings()
 	})
 	return initErr
 }

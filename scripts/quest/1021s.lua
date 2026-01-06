@@ -23,13 +23,13 @@ function start()
     
     sayBoth("Please take all Roger's Apples that I gave you. You will be able to see the HP bar increasing right away. Please talk to me again when you recover your HP 100%.")
     
-    -- Give Roger's Apple (TODO: implement hasItem/addItem checks)
-    -- if not hasItem(2010007) then
-    --     if not giveItem(2010007, 1) then
-    --         sayNext("Please check if your inventory is full or not.")
-    --         return
-    --     end
-    -- end
+    -- Give Roger's Apple
+    if not hasItem(2010007, 1) then
+        if not giveItem(2010007, 1) then
+            sayNext("Please check if your inventory is full or not.")
+            return
+        end
+    end
     
     -- Start the quest
     forceStartQuest(1021)

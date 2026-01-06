@@ -17,9 +17,9 @@ function start()
     
     sayBoth("Okay, this is all I can teach you. I know it's sad but it is time to say good bye. Well take care of yourself and Good luck my friend!\r\n\r\n#fUI/UIWindow2.img/QuestIcon/4/0#\r\n#i2010000# 3 #t2010000#\r\n#i2010009# 3 #t2010009#\r\n\r\n#fUI/UIWindow2.img/QuestIcon/8/0# 10 exp")
     
-    -- Give items (TODO: implement inventory check)
-    -- giveItem(2010000, 3) -- Apple
-    -- giveItem(2010009, 3) -- Green Apple
+    -- Give items
+    giveItem(2010000, 3) -- Apple
+    giveItem(2010009, 3) -- Green Apple
     
     -- Give EXP
     giveExp(10)

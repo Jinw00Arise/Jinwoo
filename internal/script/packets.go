@@ -156,8 +156,13 @@ func buildQuestCompletePacket(questID uint16) []byte {
 
 // Stat flags for StatChanged packet
 const (
+	StatLevel uint32 = 0x10
 	StatHP    uint32 = 0x400
+	StatMaxHP uint32 = 0x800
 	StatMP    uint32 = 0x1000
+	StatMaxMP uint32 = 0x2000
+	StatAP    uint32 = 0x4000
+	StatSP    uint32 = 0x8000
 	StatEXP   uint32 = 0x10000
 	StatMoney uint32 = 0x40000
 )
@@ -200,6 +205,48 @@ func buildMesoStatPacket(meso int32) []byte {
 	p.WriteByte(0)              // bEnableByItem
 	return p
 }
+
+// buildLevelUpStatPacket creates a packet to update stats after level up
+func buildLevelUpStatPacket(level byte, hp, maxHP, mp, maxMP int32, ap, sp int16, exp int32) []byte {
+	p := packet.NewWithOpcode(maple.SendStatChanged)
+	p.WriteBool(true) // bExclRequestSent
+	
+	// Combine all stat flags
+	flag := StatLevel | StatHP | StatMaxHP | StatMP | StatMaxMP | StatAP | StatSP | StatEXP
+	p.WriteInt(flag)
+	
+	// Write stats in flag order
+	p.WriteByte(level)          // Level
+	p.WriteInt(uint32(hp))      // HP
+	p.WriteInt(uint32(maxHP))   // MaxHP
+	p.WriteInt(uint32(mp))      // MP
+	p.WriteInt(uint32(maxMP))   // MaxMP
+	p.WriteShort(uint16(ap))    // AP
+	p.WriteShort(uint16(sp))    // SP
+	p.WriteInt(uint32(exp))     // EXP
+	
+	p.WriteByte(0) // bEnableByStat
+	p.WriteByte(0) // bEnableByItem
+	return p
+}
+
+// buildShowEffectPacket creates a packet to show a user effect (like level up)
+func buildShowEffectPacket(effectType byte) []byte {
+	p := packet.NewWithOpcode(maple.SendUserEffectLocal)
+	p.WriteByte(effectType)
+	return p
+}
+
+// Effect types for SendUserEffectLocal
+const (
+	EffectLevelUp     byte = 0
+	EffectSkillUse    byte = 1
+	EffectSkillAffect byte = 2
+	EffectQuest       byte = 3
+	EffectPet         byte = 4
+	EffectProtection  byte = 5
+	// ... more effect types
+)
 
 // buildExpMessagePacket creates a packet to show EXP gain notification
 func buildExpMessagePacket(exp int32, quest bool) []byte {

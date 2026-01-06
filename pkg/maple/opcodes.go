@@ -353,8 +353,8 @@ const (
 	SendCheckSPWResult           uint16 = 27
 
 	// CWvsContext::OnPacket
-	// SendInventoryOperation       uint16 = 28
-	// SendInventoryGrow            uint16 = 29
+	SendInventoryOperation          uint16 = 28
+	SendInventoryGrow               uint16 = 29
 	SendStatChanged                 uint16 = 30
 	// SendTemporaryStatSet         uint16 = 31
 	// SendTemporaryStatReset       uint16 = 32
@@ -832,6 +832,8 @@ var sendOpcodeNames = map[uint16]string{
 	SendDeleteCharacterResult:    "DeleteCharacterResult",
 	SendMigrateCommand:           "MigrateCommand",
 	SendAliveReq:                 "AliveReq",
+	SendInventoryOperation:       "InventoryOperation",
+	SendInventoryGrow:            "InventoryGrow",
 	SendStatChanged:              "StatChanged",
 	SendMessage:                  "Message",
 	SendSetField:                 "SetField",

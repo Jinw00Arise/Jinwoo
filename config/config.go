@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
@@ -34,6 +35,11 @@ type ChannelConfig struct {
 	ChannelID    byte
 	WZPath       string
 	ScriptsPath  string
+	// Rate multipliers
+	ExpRate      float64 // General EXP rate multiplier (default 1.0)
+	QuestExpRate float64 // Quest EXP rate multiplier (default 1.0)
+	MesoRate     float64 // Meso drop rate multiplier (default 1.0)
+	DropRate     float64 // Item drop rate multiplier (default 1.0)
 }
 
 func Load() *LoginConfig {
@@ -72,12 +78,25 @@ func LoadChannel() *ChannelConfig {
 		ChannelID:    0,
 		WZPath:       getEnv("WZ_PATH", "data/wz"),
 		ScriptsPath:  getEnv("SCRIPTS_PATH", "scripts"),
+		ExpRate:      getEnvFloat("EXP_RATE", 1.0),
+		QuestExpRate: getEnvFloat("QUEST_EXP_RATE", 1.0),
+		MesoRate:     getEnvFloat("MESO_RATE", 1.0),
+		DropRate:     getEnvFloat("DROP_RATE", 1.0),
 	}
 }
 
 func getEnv(key, fallback string) string {
 	if val := os.Getenv(key); val != "" {
 		return val
+	}
+	return fallback
+}
+
+func getEnvFloat(key string, fallback float64) float64 {
+	if val := os.Getenv(key); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			return f
+		}
 	}
 	return fallback
 }

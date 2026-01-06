@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"sort"
 	"time"
 
 	"github.com/Jinw00Arise/Jinwoo/internal/database/models"
@@ -14,11 +15,25 @@ type QuestData struct {
 	CompletedQuests map[uint16]int64  // questID -> completion time (unix nano)
 }
 
+// InventoryData represents inventory information for SetField packet
+type InventoryData struct {
+	Equipped []*models.Inventory // Worn equipment (negative slots)
+	Equip    []*models.Inventory // Equipment inventory
+	Consume  []*models.Inventory // Consumables
+	Install  []*models.Inventory // Setup items
+	Etc      []*models.Inventory // Etc items
+	Cash     []*models.Inventory // Cash items
+}
+
 func SetFieldPacket(char *models.Character, channelID int, fieldKey byte) packet.Packet {
-	return SetFieldPacketWithQuests(char, channelID, fieldKey, nil)
+	return SetFieldPacketFull(char, channelID, fieldKey, nil, nil)
 }
 
 func SetFieldPacketWithQuests(char *models.Character, channelID int, fieldKey byte, quests *QuestData) packet.Packet {
+	return SetFieldPacketFull(char, channelID, fieldKey, quests, nil)
+}
+
+func SetFieldPacketFull(char *models.Character, channelID int, fieldKey byte, quests *QuestData, inv *InventoryData) packet.Packet {
 	p := packet.NewWithOpcode(maple.SendSetField)
 
 	// SetField header
@@ -36,7 +51,7 @@ func SetFieldPacketWithQuests(char *models.Character, channelID int, fieldKey by
 	p.WriteInt(seed ^ 0x87654321)
 
 	// CharacterData::Decode
-	writeCharacterDataWithQuests(&p, char, quests)
+	writeCharacterDataFull(&p, char, quests, inv)
 
 	// CWvsContext::OnSetLogoutGiftConfig
 	p.WriteInt(0) // bPredictQuit
@@ -45,17 +60,21 @@ func SetFieldPacketWithQuests(char *models.Character, channelID int, fieldKey by
 	p.WriteInt(0)
 	p.WriteInt(0)
 
-	// ftServer (FileTime - 8 bytes)
+	// ftServer - current server time
 	writeFileTime(&p, time.Now())
 
 	return p
 }
 
 func writeCharacterData(p *packet.Packet, char *models.Character) {
-	writeCharacterDataWithQuests(p, char, nil)
+	writeCharacterDataFull(p, char, nil, nil)
 }
 
 func writeCharacterDataWithQuests(p *packet.Packet, char *models.Character, quests *QuestData) {
+	writeCharacterDataFull(p, char, quests, nil)
+}
+
+func writeCharacterDataFull(p *packet.Packet, char *models.Character, quests *QuestData, inv *InventoryData) {
 	// DBChar flag - ALL = -1 (0xFFFFFFFFFFFFFFFF as unsigned)
 	p.WriteLong(0xFFFFFFFFFFFFFFFF)
 
@@ -80,24 +99,20 @@ func writeCharacterDataWithQuests(p *packet.Packet, char *models.Character, ques
 	// EQUIPEXT flag (FileTime)
 	writeFileTime(p, time.Time{}) // Default/zero time
 
-	// ITEMSLOTEQUIP flag - all empty for now
-	p.WriteShort(0) // Normal equipped items terminator
-	p.WriteShort(0) // Cash equipped items terminator
-	p.WriteShort(0) // Equip inventory terminator
-	p.WriteShort(0) // Dragon equips terminator
-	p.WriteShort(0) // Mechanic equips terminator
+	// ITEMSLOTEQUIP flag
+	writeEquipInventory(p, inv)
 
 	// ITEMSLOTCONSUME flag
-	p.WriteByte(0) // Consume inventory terminator
+	writeItemInventory(p, inv, models.InventoryConsume)
 
 	// ITEMSLOTINSTALL flag
-	p.WriteByte(0) // Install inventory terminator
+	writeItemInventory(p, inv, models.InventoryInstall)
 
 	// ITEMSLOTETC flag
-	p.WriteByte(0) // Etc inventory terminator
+	writeItemInventory(p, inv, models.InventoryEtc)
 
 	// ITEMSLOTCASH flag
-	p.WriteByte(0) // Cash inventory terminator
+	writeItemInventory(p, inv, models.InventoryCash)
 
 	// SKILLRECORD flag
 	p.WriteShort(0) // No skills
@@ -219,9 +234,13 @@ func writeFixedString(p *packet.Packet, s string, length int) {
 }
 
 // writeFileTime writes a Windows FILETIME (100-nanosecond intervals since Jan 1, 1601)
+// DEFAULT_TIME is the FILETIME value representing "no expiration" in MapleStory
+const DEFAULT_TIME uint64 = 150842304000000000
+
 func writeFileTime(p *packet.Packet, t time.Time) {
 	if t.IsZero() {
-		p.WriteLong(0)
+		// Use DEFAULT_TIME for permanent/non-expiring items
+		p.WriteLong(DEFAULT_TIME)
 		return
 	}
 	// Convert Unix time to Windows FILETIME
@@ -231,6 +250,202 @@ func writeFileTime(p *packet.Packet, t time.Time) {
 	const unixToFileTime = 116444736000000000
 	ft := uint64(t.UnixNano()/100) + unixToFileTime
 	p.WriteLong(ft)
+}
+
+// writeEquipInventory writes all equipment-related inventory sections
+func writeEquipInventory(p *packet.Packet, inv *InventoryData) {
+	if inv == nil {
+		// Empty inventory - write terminators
+		p.WriteShort(0) // Normal equipped items terminator
+		p.WriteShort(0) // Cash equipped items terminator
+		p.WriteShort(0) // Equip inventory terminator
+		p.WriteShort(0) // Dragon equips terminator
+		p.WriteShort(0) // Mechanic equips terminator
+		return
+	}
+	
+	// Sort equipped items by slot for consistent encoding
+	// Normal equipped items (slots -1 to -100, excluding cash equips at -100 to -199)
+	var normalEquipped []*models.Inventory
+	var cashEquipped []*models.Inventory
+	
+	for _, item := range inv.Equipped {
+		if item.Slot <= -100 {
+			cashEquipped = append(cashEquipped, item)
+		} else {
+			normalEquipped = append(normalEquipped, item)
+		}
+	}
+	
+	// Sort by slot (ascending by absolute value for equipped items)
+	sort.Slice(normalEquipped, func(i, j int) bool {
+		return normalEquipped[i].Slot > normalEquipped[j].Slot // -1, -2, -3...
+	})
+	sort.Slice(cashEquipped, func(i, j int) bool {
+		return cashEquipped[i].Slot > cashEquipped[j].Slot
+	})
+	
+	// Write normal equipped items
+	for _, item := range normalEquipped {
+		slot := -item.Slot // Convert to positive slot number
+		p.WriteShort(uint16(slot))
+		writeEquipItem(p, item)
+	}
+	p.WriteShort(0) // Normal equipped terminator
+	
+	// Write cash equipped items
+	for _, item := range cashEquipped {
+		slot := -(item.Slot + 100) // Convert cash slot to positive
+		p.WriteShort(uint16(slot))
+		writeEquipItem(p, item)
+	}
+	p.WriteShort(0) // Cash equipped terminator
+	
+	// Write equip inventory (unequipped equipment)
+	sortedEquip := make([]*models.Inventory, len(inv.Equip))
+	copy(sortedEquip, inv.Equip)
+	sort.Slice(sortedEquip, func(i, j int) bool {
+		return sortedEquip[i].Slot < sortedEquip[j].Slot
+	})
+	
+	for _, item := range sortedEquip {
+		p.WriteShort(uint16(item.Slot))
+		writeEquipItem(p, item)
+	}
+	p.WriteShort(0) // Equip inventory terminator
+	
+	// Dragon/Mechanic equips (not implemented)
+	p.WriteShort(0) // Dragon equips terminator
+	p.WriteShort(0) // Mechanic equips terminator
+}
+
+// Item types for GW_ItemSlotBase
+const (
+	ItemTypeEquip  byte = 1
+	ItemTypeBundle byte = 2 // Stackable items (consume, etc, install)
+	ItemTypePet    byte = 3
+)
+
+// writeEquipItem writes a single equipment item
+func writeEquipItem(p *packet.Packet, item *models.Inventory) {
+	p.WriteByte(ItemTypeEquip) // nType
+	
+	// GW_ItemSlotBase::RawDecode
+	p.WriteInt(uint32(item.ItemID))
+	p.WriteBool(false) // bCashItemSN (cash item unique ID flag)
+	// if cash: p.WriteLong(itemSn)
+	writeFileTime(p, time.Time{}) // ftExpire
+	
+	// Equipment stats
+	slots := byte(7)
+	if item.Slots != nil {
+		slots = *item.Slots
+	}
+	p.WriteByte(slots) // nRUC (remaining upgrade count)
+	
+	level := byte(0)
+	if item.Level != nil {
+		level = *item.Level
+	}
+	p.WriteByte(level) // nCUC (current upgrade count)
+	
+	writeEquipStat(p, item.STR)
+	writeEquipStat(p, item.DEX)
+	writeEquipStat(p, item.INT)
+	writeEquipStat(p, item.LUK)
+	writeEquipStat(p, item.HP)
+	writeEquipStat(p, item.MP)
+	writeEquipStat(p, item.WAtk)
+	writeEquipStat(p, item.MAtk)
+	writeEquipStat(p, item.WDef)
+	writeEquipStat(p, item.MDef)
+	writeEquipStat(p, item.Accuracy)
+	writeEquipStat(p, item.Avoidability)
+	writeEquipStat(p, item.Hands)
+	writeEquipStat(p, item.Speed)
+	writeEquipStat(p, item.Jump)
+	
+	p.WriteString("")   // sTitle (owner name)
+	p.WriteShort(0)     // nAttribute (item flags)
+	p.WriteByte(0)      // nLevelUpType
+	p.WriteByte(0)      // nLevel (item level)
+	p.WriteInt(0)       // nEXP (item EXP)
+	p.WriteInt(0xFFFFFFFF) // nDurability (-1)
+	p.WriteInt(0)       // nIUC (vicious hammer)
+	p.WriteByte(0)      // nGrade (potential grade)
+	p.WriteByte(0)      // nCHUC (enhancement stars)
+	p.WriteShort(0)     // nOption1 (potential line 1)
+	p.WriteShort(0)     // nOption2 (potential line 2)
+	p.WriteShort(0)     // nOption3 (potential line 3)
+	p.WriteShort(0)     // nSocket1
+	p.WriteShort(0)     // nSocket2
+	p.WriteLong(0)      // liSN (serial number)
+	writeFileTime(p, time.Time{}) // ftEquipped
+	p.WriteInt(0xFFFFFFFF) // nPrevBonusExpRate (-1)
+}
+
+// writeEquipStat writes a single stat value (or 0 if nil)
+func writeEquipStat(p *packet.Packet, stat *int16) {
+	if stat != nil {
+		p.WriteShort(uint16(*stat))
+	} else {
+		p.WriteShort(0)
+	}
+}
+
+// writeItemInventory writes a non-equip inventory (consume, etc, install, cash)
+func writeItemInventory(p *packet.Packet, inv *InventoryData, invType models.InventoryType) {
+	var items []*models.Inventory
+	
+	if inv != nil {
+		switch invType {
+		case models.InventoryConsume:
+			items = inv.Consume
+		case models.InventoryInstall:
+			items = inv.Install
+		case models.InventoryEtc:
+			items = inv.Etc
+		case models.InventoryCash:
+			items = inv.Cash
+		}
+	}
+	
+	if len(items) == 0 {
+		p.WriteByte(0) // Terminator
+		return
+	}
+	
+	// Sort by slot
+	sorted := make([]*models.Inventory, len(items))
+	copy(sorted, items)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Slot < sorted[j].Slot
+	})
+	
+	for _, item := range sorted {
+		p.WriteByte(byte(item.Slot))
+		writeStackableItem(p, item)
+	}
+	p.WriteByte(0) // Terminator
+}
+
+// writeStackableItem writes a stackable (non-equip) item
+func writeStackableItem(p *packet.Packet, item *models.Inventory) {
+	p.WriteByte(ItemTypeBundle) // nType
+	
+	// GW_ItemSlotBase::RawDecode
+	p.WriteInt(uint32(item.ItemID))
+	p.WriteBool(false) // bCashItemSN
+	// if cash: p.WriteLong(itemSn)
+	writeFileTime(p, time.Time{}) // ftExpire
+	
+	// GW_ItemSlotBundle::RawDecode
+	p.WriteShort(uint16(item.Quantity)) // nNumber
+	p.WriteString("")  // sTitle (owner)
+	p.WriteShort(0)    // nAttribute (flags)
+	
+	// For rechargeable items (stars/bullets), we'd need extra data:
+	// if ItemConstants.isRechargeableItem(itemId): p.WriteLong(itemSn)
 }
 
 // UserChatPacket creates a chat message packet
@@ -519,5 +734,26 @@ func StatChangedPacket(exclRequest bool, stats map[uint32]int64) packet.Packet {
 	p.WriteByte(0)  // bEnableByStat
 	p.WriteByte(0)  // bEnableByItem
 	
+	return p
+}
+
+// Effect types for SendUserEffectLocal
+const (
+	EffectLevelUp       byte = 0
+	EffectSkillUse      byte = 1
+	EffectSkillAffected byte = 2
+	EffectQuest         byte = 3
+	EffectPet           byte = 4
+	EffectProtectOnDie  byte = 5
+	EffectPlayPortalSE  byte = 6
+	EffectJobChanged    byte = 7
+	EffectQuestComplete byte = 8
+	EffectBuffExpire    byte = 10
+)
+
+// UserEffectPacket creates a packet to show a local user effect (like level up)
+func UserEffectPacket(effectType byte) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendUserEffectLocal)
+	p.WriteByte(effectType)
 	return p
 }

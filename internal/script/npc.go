@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	"github.com/Jinw00Arise/Jinwoo/internal/database/models"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/exp"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/inventory"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -13,6 +15,7 @@ import (
 type NPCConversation struct {
 	NPCID           int
 	Character       *models.Character
+	Inventory       *inventory.Manager
 	State           *lua.LState
 	Script          string
 	SendPacket      func([]byte) error
@@ -22,6 +25,9 @@ type NPCConversation struct {
 	// Quest callbacks for server-side tracking
 	OnQuestStart    func(questID uint16)
 	OnQuestComplete func(questID uint16)
+	// Rate multipliers (set from config)
+	ExpRate         float64
+	QuestExpRate    float64
 }
 
 // NPCMessageType represents different NPC message types
@@ -394,20 +400,77 @@ func npcWarp(conv *NPCConversation) lua.LGFunction {
 
 func npcGiveExp(conv *NPCConversation) lua.LGFunction {
 	return func(L *lua.LState) int {
-		exp := int32(L.CheckInt(1))
-		log.Printf("[Script] Give %d EXP to %s", exp, conv.Character.Name)
+		baseExp := int32(L.CheckInt(1))
+		
+		// Apply EXP rate multiplier (use QuestExpRate for scripts, default to 1.0)
+		rate := conv.QuestExpRate
+		if rate <= 0 {
+			rate = 1.0
+		}
+		expGain := int32(float64(baseExp) * rate)
+		
+		log.Printf("[Script] Give %d EXP to %s (base: %d, rate: %.1fx, current: lvl %d, exp %d)", 
+			expGain, conv.Character.Name, baseExp, rate, conv.Character.Level, conv.Character.EXP)
 		
 		// Update character EXP
-		conv.Character.EXP += exp
+		conv.Character.EXP += expGain
 		
-		// Send stat update packet
-		statPacket := buildExpStatPacket(conv.Character.EXP)
-		if err := conv.SendPacket(statPacket); err != nil {
-			log.Printf("Failed to send EXP stat: %v", err)
+		// Check for level up
+		oldLevel := conv.Character.Level
+		newLevel, newExp, levelsGained := exp.CalculateLevelUp(conv.Character.Level, conv.Character.EXP)
+		
+		if levelsGained > 0 {
+			// Character leveled up!
+			conv.Character.Level = newLevel
+			conv.Character.EXP = newExp
+			
+			// Grant AP and SP per level (5 AP, 3 SP for beginners)
+			apGain := int16(levelsGained * 5)
+			spGain := int16(levelsGained * 3)
+			conv.Character.AP += apGain
+			conv.Character.SP += spGain
+			
+			// Increase MaxHP and MaxMP (simplified formula)
+			for i := 0; i < levelsGained; i++ {
+				// Beginner HP/MP gain (can be enhanced later for different jobs)
+				conv.Character.MaxHP += 12 + int32(conv.Character.Level-byte(i))/5
+				conv.Character.MaxMP += 8 + int32(conv.Character.Level-byte(i))/5
+			}
+			
+			// Fully heal on level up
+			conv.Character.HP = conv.Character.MaxHP
+			conv.Character.MP = conv.Character.MaxMP
+			
+			log.Printf("[Script] %s leveled up! %d -> %d (gained %d levels)", 
+				conv.Character.Name, oldLevel, newLevel, levelsGained)
+			
+			// Send level up stat packet (includes all changed stats)
+			statPacket := buildLevelUpStatPacket(
+				conv.Character.Level,
+				conv.Character.HP, conv.Character.MaxHP,
+				conv.Character.MP, conv.Character.MaxMP,
+				conv.Character.AP, conv.Character.SP,
+				conv.Character.EXP,
+			)
+			if err := conv.SendPacket(statPacket); err != nil {
+				log.Printf("Failed to send level up stat: %v", err)
+			}
+			
+			// Send level up effect
+			effectPacket := buildShowEffectPacket(EffectLevelUp)
+			if err := conv.SendPacket(effectPacket); err != nil {
+				log.Printf("Failed to send level up effect: %v", err)
+			}
+		} else {
+			// No level up, just send EXP update
+			statPacket := buildExpStatPacket(conv.Character.EXP)
+			if err := conv.SendPacket(statPacket); err != nil {
+				log.Printf("Failed to send EXP stat: %v", err)
+			}
 		}
 		
 		// Send EXP gain message (shows notification)
-		msgPacket := buildExpMessagePacket(exp, true)
+		msgPacket := buildExpMessagePacket(expGain, true)
 		if err := conv.SendPacket(msgPacket); err != nil {
 			log.Printf("Failed to send EXP message: %v", err)
 		}
@@ -442,32 +505,95 @@ func npcGiveMeso(conv *NPCConversation) lua.LGFunction {
 
 func npcGiveItem(conv *NPCConversation) lua.LGFunction {
 	return func(L *lua.LState) int {
-		itemID := L.CheckInt(1)
-		count := L.OptInt(2, 1)
+		itemID := int32(L.CheckInt(1))
+		count := int16(L.OptInt(2, 1))
 		log.Printf("[Script] Give %d x item %d to %s", count, itemID, conv.Character.Name)
-		// TODO: Actually give item
-		L.Push(lua.LBool(true)) // Return success
+		
+		// Check if inventory manager is available
+		if conv.Inventory == nil {
+			log.Printf("[Script] Warning: Inventory manager not available")
+			L.Push(lua.LBool(false))
+			return 1
+		}
+		
+		// Add item to inventory
+		operations, err := conv.Inventory.AddItem(itemID, count)
+		if err != nil {
+			log.Printf("[Script] Failed to give item: %v", err)
+			L.Push(lua.LBool(false))
+			return 1
+		}
+		
+		// Send inventory update packets to client
+		if len(operations) > 0 {
+			packet := inventory.InventoryOperationPacket(operations, true)
+			if err := conv.SendPacket(packet); err != nil {
+				log.Printf("[Script] Failed to send inventory packet: %v", err)
+			}
+		}
+		
+		log.Printf("[Script] Successfully gave %d x item %d to %s", count, itemID, conv.Character.Name)
+		L.Push(lua.LBool(true))
 		return 1
 	}
 }
 
 func npcHasItem(conv *NPCConversation) lua.LGFunction {
 	return func(L *lua.LState) int {
-		itemID := L.CheckInt(1)
-		count := L.OptInt(2, 1)
+		itemID := int32(L.CheckInt(1))
+		count := int16(L.OptInt(2, 1))
 		log.Printf("[Script] Check if %s has %d x item %d", conv.Character.Name, count, itemID)
-		// TODO: Actually check inventory
-		L.Push(lua.LBool(false))
+		
+		// Check if inventory manager is available
+		if conv.Inventory == nil {
+			log.Printf("[Script] Warning: Inventory manager not available")
+			L.Push(lua.LBool(false))
+			return 1
+		}
+		
+		hasItem := conv.Inventory.HasItem(itemID, count)
+		L.Push(lua.LBool(hasItem))
 		return 1
 	}
 }
 
 func npcTakeItem(conv *NPCConversation) lua.LGFunction {
 	return func(L *lua.LState) int {
-		itemID := L.CheckInt(1)
-		count := L.OptInt(2, 1)
+		itemID := int32(L.CheckInt(1))
+		count := int16(L.OptInt(2, 1))
 		log.Printf("[Script] Take %d x item %d from %s", count, itemID, conv.Character.Name)
-		// TODO: Actually take item
+		
+		// Check if inventory manager is available
+		if conv.Inventory == nil {
+			log.Printf("[Script] Warning: Inventory manager not available")
+			L.Push(lua.LBool(false))
+			return 1
+		}
+		
+		// Check if player has the items first
+		if !conv.Inventory.HasItem(itemID, count) {
+			log.Printf("[Script] Player doesn't have %d x item %d", count, itemID)
+			L.Push(lua.LBool(false))
+			return 1
+		}
+		
+		// Remove item from inventory
+		operations, err := conv.Inventory.RemoveItem(itemID, count)
+		if err != nil {
+			log.Printf("[Script] Failed to take item: %v", err)
+			L.Push(lua.LBool(false))
+			return 1
+		}
+		
+		// Send inventory update packets to client
+		if len(operations) > 0 {
+			packet := inventory.InventoryOperationPacket(operations, true)
+			if err := conv.SendPacket(packet); err != nil {
+				log.Printf("[Script] Failed to send inventory packet: %v", err)
+			}
+		}
+		
+		log.Printf("[Script] Successfully took %d x item %d from %s", count, itemID, conv.Character.Name)
 		L.Push(lua.LBool(true))
 		return 1
 	}
