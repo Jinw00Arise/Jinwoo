@@ -72,7 +72,12 @@ func (c *Connection) Write(p packet.Packet) error {
 	if len(p) >= 2 {
 		opcode := uint16(p[0]) | uint16(p[1])<<8
 		if !ignoredSendOpcodes[opcode] || debugPackets {
-			log.Printf("[SEND] 0x%04X [%s] len=%d data=%X", opcode, maple.SendOpcodeName(opcode), len(p), []byte(p))
+			name := maple.SendOpcodeName(opcode)
+			if name == "Unknown" {
+				log.Printf("[SEND] 0x%04X [%s] data=%X", opcode, name, []byte(p))
+			} else {
+				log.Printf("[SEND] [%s] data=%X", name, []byte(p))
+			}
 		}
 	}
 
@@ -117,7 +122,12 @@ func (c *Connection) Read() (packet.Packet, error) {
 	if len(data) >= 2 {
 		opcode := uint16(data[0]) | uint16(data[1])<<8
 		if !ignoredRecvOpcodes[opcode] || debugPackets {
-			log.Printf("[RECV] 0x%04X [%s] len=%d data=%X", opcode, maple.RecvOpcodeName(opcode), len(data), data)
+			name := maple.RecvOpcodeName(opcode)
+			if name == "Unknown" {
+				log.Printf("[RECV] 0x%04X [%s] data=%X", opcode, name, data)
+			} else {
+				log.Printf("[RECV] [%s] data=%X", name, data)
+			}
 		}
 	}
 

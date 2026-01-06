@@ -16,7 +16,18 @@ func Connect(databaseURL string) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	if err := db.AutoMigrate(&models.Account{}, &models.Character{}); err != nil {
+	// Auto-migrate all models
+	if err := db.AutoMigrate(
+		&models.Account{},
+		&models.Character{},
+		&models.Inventory{},
+		&models.Skill{},
+		&models.SkillMacro{},
+		&models.QuestRecord{},
+		&models.QuestRecordEx{},
+		&models.KeyBinding{},
+		&models.QuickSlot{},
+	); err != nil {
 		return nil, err
 	}
 

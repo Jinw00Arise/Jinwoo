@@ -84,3 +84,14 @@ func (r *Reader) Skip(n int) {
 		r.pos = len(r.data)
 	}
 }
+
+// ReadRemaining returns all remaining data in the reader.
+func (r *Reader) ReadRemaining() []byte {
+	if r.pos >= len(r.data) {
+		return nil
+	}
+	data := make([]byte, len(r.data)-r.pos)
+	copy(data, r.data[r.pos:])
+	r.pos = len(r.data)
+	return data
+}
