@@ -9,6 +9,7 @@ import (
 	"github.com/Jinw00Arise/Jinwoo/internal/database/repository"
 	"github.com/Jinw00Arise/Jinwoo/internal/game/exp"
 	"github.com/Jinw00Arise/Jinwoo/internal/game/inventory"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/stage"
 	"github.com/Jinw00Arise/Jinwoo/internal/network"
 	"github.com/Jinw00Arise/Jinwoo/internal/packet"
 	"github.com/Jinw00Arise/Jinwoo/internal/script"
@@ -16,53 +17,59 @@ import (
 	"github.com/Jinw00Arise/Jinwoo/pkg/maple"
 )
 
-// QuestRecord represents an in-progress or completed quest
-type QuestRecord struct {
-	State        byte   // QuestStatePerform or QuestStateComplete
-	Value        string // Progress value for in-progress quests
-	CompleteTime int64  // Unix nano for completed quests
-}
-
-// FieldDrop represents an item dropped on the ground
-type FieldDrop struct {
-	ObjectID uint32
-	ItemID   int32
-	Quantity int16
-	X        int16
-	Y        int16
-	OwnerID  uint   // Character ID who dropped it
-	DropTime int64  // Unix timestamp
-}
-
+// Handler processes packets for a single client connection
 type Handler struct {
-	conn            *network.Connection
-	config          *config.ChannelConfig
-	characters      *repository.CharacterRepository
-	inventories     *repository.InventoryRepository
-	character       *models.Character
-	inventory       *inventory.Manager
-	fieldKey        byte
-	nextObjectID    uint32
-	spawnedNPCs     map[uint32]int           // object ID -> NPC template ID
-	fieldDrops      map[uint32]*FieldDrop    // object ID -> drop
-	npcConversation *script.NPCConversation
-	activeQuests    map[uint16]*QuestRecord  // questID -> record (in progress)
-	completedQuests map[uint16]*QuestRecord  // questID -> record (completed)
-	// Player position (transient, updated from movement packets)
-	posX            int16
-	posY            int16
+	conn         *network.Connection
+	config       *config.ChannelConfig
+	characters   *repository.CharacterRepository
+	inventories  *repository.InventoryRepository
+	stageManager *stage.StageManager
+	user         *stage.User
 }
 
-func NewHandler(conn *network.Connection, cfg *config.ChannelConfig, characters *repository.CharacterRepository, inventories *repository.InventoryRepository) *Handler {
+func NewHandler(conn *network.Connection, cfg *config.ChannelConfig, characters *repository.CharacterRepository, inventories *repository.InventoryRepository, stageManager *stage.StageManager) *Handler {
 	return &Handler{
-		conn:            conn,
-		config:          cfg,
-		characters:      characters,
-		inventories:     inventories,
-		activeQuests:    make(map[uint16]*QuestRecord),
-		completedQuests: make(map[uint16]*QuestRecord),
-		fieldDrops:      make(map[uint32]*FieldDrop),
+		conn:         conn,
+		config:       cfg,
+		characters:   characters,
+		inventories:  inventories,
+		stageManager: stageManager,
 	}
+}
+
+// OnDisconnect cleans up when a user disconnects
+func (h *Handler) OnDisconnect() {
+	if h.user == nil {
+		return
+	}
+	
+	// Remove from current stage
+	if currentStage := h.user.Stage(); currentStage != nil {
+		currentStage.Users().Remove(h.user.CharacterID())
+		log.Printf("[Handler] %s disconnected from stage %d", h.user.Name(), currentStage.MapID())
+	}
+}
+
+// Helper accessors for backward compatibility during refactoring
+func (h *Handler) character() *models.Character {
+	if h.user == nil {
+		return nil
+	}
+	return h.user.Character()
+}
+
+func (h *Handler) inventory() *inventory.Manager {
+	if h.user == nil {
+		return nil
+	}
+	return h.user.Inventory()
+}
+
+func (h *Handler) currentStage() *stage.Stage {
+	if h.user == nil {
+		return nil
+	}
+	return h.user.Stage()
 }
 
 func (h *Handler) Handle(p packet.Packet) {
@@ -114,74 +121,73 @@ func (h *Handler) handleMigrateIn(reader *packet.Reader) {
 		return
 	}
 
-	h.character = char
-	h.fieldKey = 1 // Initial field key, increments on field change
-	h.nextObjectID = 1000 // Start object IDs at 1000
-	h.spawnedNPCs = make(map[uint32]int)
-	h.fieldDrops = make(map[uint32]*FieldDrop)
-	
-	// Initialize position from spawn point
-	dm := wz.GetInstance()
-	if dm != nil {
-		if mapData, err := dm.GetMapData(int(char.MapID)); err == nil {
-			if int(char.SpawnPoint) < len(mapData.Portals) {
-				portal := mapData.Portals[char.SpawnPoint]
-				h.posX = int16(portal.X)
-				h.posY = int16(portal.Y)
-			}
-		}
-	}
+	// Create user and initialize
+	h.user = stage.NewUser(h.conn, char)
 	
 	// Initialize and load inventory
-	h.inventory = inventory.NewManager(char.ID, h.inventories)
-	if err := h.inventory.Load(); err != nil {
+	inv := inventory.NewManager(char.ID, h.inventories)
+	if err := inv.Load(); err != nil {
 		log.Printf("Failed to load inventory for %d: %v", characterID, err)
 		// Continue anyway, inventory will just be empty
 	}
+	h.user.SetInventory(inv)
 	
-	log.Printf("Player %s (id=%d) entering game at (%d, %d)", char.Name, char.ID, h.posX, h.posY)
+	// Get or create the stage for the character's map
+	currentStage := h.stageManager.GetOrCreate(char.MapID)
+	
+	// Initialize position from spawn point
+	if currentStage.MapData() != nil {
+		portals := currentStage.MapData().Portals
+		if int(char.SpawnPoint) < len(portals) {
+			portal := portals[char.SpawnPoint]
+			h.user.SetPosition(int16(portal.X), int16(portal.Y))
+		}
+	}
+	
+	// Add user to stage
+	h.user.SetStage(currentStage)
+	currentStage.Users().Add(h.user)
+	
+	// Spawn NPCs if not already spawned on this stage
+	currentStage.SpawnNPCs()
+	
+	posX, posY := h.user.Position()
+	log.Printf("Player %s (id=%d) entering game at (%d, %d)", char.Name, char.ID, posX, posY)
 
 	// Send SetField to spawn the player
-	if err := h.conn.Write(SetFieldPacketFull(char, int(h.config.ChannelID), h.fieldKey, h.getQuestData(), h.getInventoryData())); err != nil {
+	if err := h.conn.Write(SetFieldPacketFull(char, int(h.config.ChannelID), h.user.StageKey(), h.getQuestData(), h.getInventoryData())); err != nil {
 		log.Printf("Failed to send SetField: %v", err)
 		return
 	}
 
 	log.Printf("Player %s spawned on map %d", char.Name, char.MapID)
 
-	// Spawn NPCs from map data
-	h.spawnMapNPCs(int(char.MapID))
+	// Send NPCs and drops to this user
+	h.sendNPCsToUser()
+	h.sendDropsToUser()
 }
 
-func (h *Handler) spawnMapNPCs(mapID int) {
+// sendNPCsToUser sends all NPCs from the current stage to the user
+func (h *Handler) sendNPCsToUser() {
+	currentStage := h.currentStage()
+	if currentStage == nil {
+		return
+	}
+	
 	dm := wz.GetInstance()
-	if dm == nil {
-		return
-	}
-
-	mapData, err := dm.GetMapData(mapID)
-	if err != nil {
-		log.Printf("Failed to load map data for %d: %v", mapID, err)
-		return
-	}
-
-	for _, npc := range mapData.NPCs {
-		objectID := h.nextObjectID
-		h.nextObjectID++
-
-		// Track NPC object ID -> template ID mapping
-		h.spawnedNPCs[objectID] = npc.ID
-
+	npcs := currentStage.Npcs().GetAll()
+	
+	for _, npc := range npcs {
 		// Send NPC enter field packet
 		p := NpcEnterFieldPacket(
-			objectID,
-			npc.ID,
-			int16(npc.X),
-			int16(npc.Y),
-			npc.F == 1,
-			uint16(npc.FH),
-			int16(npc.RX0),
-			int16(npc.RX1),
+			npc.ObjectID,
+			npc.TemplateID,
+			npc.X,
+			npc.Y,
+			npc.F,
+			npc.FH,
+			npc.RX0,
+			npc.RX1,
 		)
 		if err := h.conn.Write(p); err != nil {
 			log.Printf("Failed to send NPC spawn: %v", err)
@@ -191,33 +197,62 @@ func (h *Handler) spawnMapNPCs(mapID int) {
 		// Give control to this client
 		cp := NpcChangeControllerPacket(
 			true,
-			objectID,
-			npc.ID,
-			int16(npc.X),
-			int16(npc.Y),
-			npc.F == 1,
-			uint16(npc.FH),
-			int16(npc.RX0),
-			int16(npc.RX1),
+			npc.ObjectID,
+			npc.TemplateID,
+			npc.X,
+			npc.Y,
+			npc.F,
+			npc.FH,
+			npc.RX0,
+			npc.RX1,
 		)
 		if err := h.conn.Write(cp); err != nil {
 			log.Printf("Failed to send NPC controller: %v", err)
 		}
 
-		npcName := dm.GetNPCName(npc.ID)
-		if npcName != "" {
-			log.Printf("Spawned NPC: %s (id=%d, obj=%d) at (%d, %d)", npcName, npc.ID, objectID, npc.X, npc.Y)
-		} else {
-			log.Printf("Spawned NPC: id=%d (obj=%d) at (%d, %d)", npc.ID, objectID, npc.X, npc.Y)
+		if dm != nil {
+			npcName := dm.GetNPCName(npc.TemplateID)
+			if npcName != "" {
+				log.Printf("Spawned NPC: %s (id=%d, obj=%d) at (%d, %d)", npcName, npc.TemplateID, npc.ObjectID, npc.X, npc.Y)
+			}
 		}
 	}
 
-	log.Printf("Spawned %d NPCs on map %d", len(mapData.NPCs), mapID)
+	log.Printf("Spawned %d NPCs on map %d", len(npcs), currentStage.MapID())
+}
+
+// sendDropsToUser sends all existing drops on the current stage to the user
+func (h *Handler) sendDropsToUser() {
+	currentStage := h.currentStage()
+	if currentStage == nil {
+		return
+	}
+	
+	drops := currentStage.Drops().GetAll()
+	if len(drops) == 0 {
+		return
+	}
+	
+	for _, drop := range drops {
+		// Use ON_FOOTHOLD type (2) for drops that are already on the ground
+		if err := h.conn.Write(DropEnterFieldPacket(drop, drop.X, drop.Y, DropEnterOnFoothold)); err != nil {
+			log.Printf("Failed to send existing drop: %v", err)
+		}
+	}
+	
+	log.Printf("Sent %d existing drops on map %d", len(drops), currentStage.MapID())
 }
 
 // getQuestData builds quest data for SetField packet
 func (h *Handler) getQuestData() *QuestData {
-	if len(h.activeQuests) == 0 && len(h.completedQuests) == 0 {
+	if h.user == nil {
+		return nil
+	}
+	
+	activeQuests := h.user.GetAllActiveQuests()
+	completedQuests := h.user.GetAllCompletedQuests()
+	
+	if len(activeQuests) == 0 && len(completedQuests) == 0 {
 		return nil
 	}
 	
@@ -226,11 +261,11 @@ func (h *Handler) getQuestData() *QuestData {
 		CompletedQuests: make(map[uint16]int64),
 	}
 	
-	for questID, record := range h.activeQuests {
+	for questID, record := range activeQuests {
 		qd.ActiveQuests[questID] = record.Value
 	}
 	
-	for questID, record := range h.completedQuests {
+	for questID, record := range completedQuests {
 		qd.CompletedQuests[questID] = record.CompleteTime
 	}
 	
@@ -239,22 +274,23 @@ func (h *Handler) getQuestData() *QuestData {
 
 // getInventoryData builds inventory data for SetField packet
 func (h *Handler) getInventoryData() *InventoryData {
-	if h.inventory == nil {
+	inv := h.inventory()
+	if inv == nil {
 		return nil
 	}
 	
 	return &InventoryData{
-		Equipped: h.inventory.GetItemsByType(models.InventoryEquipped),
-		Equip:    h.inventory.GetItemsByType(models.InventoryEquip),
-		Consume:  h.inventory.GetItemsByType(models.InventoryConsume),
-		Install:  h.inventory.GetItemsByType(models.InventoryInstall),
-		Etc:      h.inventory.GetItemsByType(models.InventoryEtc),
-		Cash:     h.inventory.GetItemsByType(models.InventoryCash),
+		Equipped: inv.GetItemsByType(models.InventoryEquipped),
+		Equip:    inv.GetItemsByType(models.InventoryEquip),
+		Consume:  inv.GetItemsByType(models.InventoryConsume),
+		Install:  inv.GetItemsByType(models.InventoryInstall),
+		Etc:      inv.GetItemsByType(models.InventoryEtc),
+		Cash:     inv.GetItemsByType(models.InventoryCash),
 	}
 }
 
 func (h *Handler) handleUserMove(reader *packet.Reader) {
-	if h.character == nil {
+	if h.user == nil {
 		return
 	}
 
@@ -262,9 +298,8 @@ func (h *Handler) handleUserMove(reader *packet.Reader) {
 	_ = reader.ReadInt() // 0
 	fieldKey := reader.ReadByte()
 
-	// Validate field key
-	if h.fieldKey != fieldKey {
-		log.Printf("Invalid field key: expected %d, got %d", h.fieldKey, fieldKey)
+	// Validate field key (silently ignore stale keys - common during map transfers)
+	if h.user.StageKey() != fieldKey {
 		return
 	}
 
@@ -282,22 +317,21 @@ func (h *Handler) handleUserMove(reader *packet.Reader) {
 
 	// Update character position from movement path final position
 	finalX, finalY := movePath.GetFinalPosition()
-	h.posX = finalX
-	h.posY = finalY
+	h.user.SetPosition(finalX, finalY)
 
 	// TODO: Broadcast to other players in the field
-	// field.broadcastPacket(UserRemote.move(user, movePath), user)
+	// currentStage.BroadcastExcept(UserRemoteMovePacket(user, movePath), user.CharacterID())
 }
 
 func (h *Handler) handleUserTransferFieldRequest(reader *packet.Reader) {
-	if h.character == nil {
+	if h.user == nil {
 		return
 	}
 
 	// Field key validation
 	fieldKey := reader.ReadByte()
-	if h.fieldKey != fieldKey {
-		log.Printf("Invalid field key for transfer: expected %d, got %d", h.fieldKey, fieldKey)
+	if h.user.StageKey() != fieldKey {
+		log.Printf("Invalid field key for transfer: expected %d, got %d", h.user.StageKey(), fieldKey)
 		return
 	}
 
@@ -308,33 +342,21 @@ func (h *Handler) handleUserTransferFieldRequest(reader *packet.Reader) {
 	_ = reader.ReadShort() // y
 	// _ = reader.ReadByte() // bPremium (optional)
 
+	char := h.character()
 	log.Printf("[Transfer] %s requesting transfer: portal=%s, destMap=%d", 
-		h.character.Name, portalName, destMap)
+		char.Name, portalName, destMap)
 
-	// Get current map data
-	dm := wz.GetInstance()
-	if dm == nil {
-		log.Printf("[Transfer] WZ data not initialized")
+	// Get current stage and find the portal
+	currentStage := h.currentStage()
+	if currentStage == nil || currentStage.MapData() == nil {
+		log.Printf("[Transfer] Current stage or map data not available")
 		return
 	}
 
-	currentMapData, err := dm.GetMapData(int(h.character.MapID))
-	if err != nil {
-		log.Printf("[Transfer] Failed to get current map data: %v", err)
-		return
-	}
-
-	// Find the portal
-	var portal *wz.MapPortal
-	for i := range currentMapData.Portals {
-		if currentMapData.Portals[i].Name == portalName {
-			portal = &currentMapData.Portals[i]
-			break
-		}
-	}
-
+	// Find the portal on current map
+	portal, _ := currentStage.FindPortalByName(portalName)
 	if portal == nil {
-		log.Printf("[Transfer] Portal '%s' not found on map %d", portalName, h.character.MapID)
+		log.Printf("[Transfer] Portal '%s' not found on map %d", portalName, char.MapID)
 		return
 	}
 
@@ -352,7 +374,7 @@ func (h *Handler) handleUserTransferFieldRequest(reader *packet.Reader) {
 		// Scripted portal - check for script
 		scriptMgr := script.GetInstance()
 		if scriptMgr != nil {
-			if _, hasScript := scriptMgr.GetPortalScript(int(h.character.MapID), portal.Script); hasScript {
+			if _, hasScript := scriptMgr.GetPortalScript(int(char.MapID), portal.Script); hasScript {
 				log.Printf("[Transfer] Portal has script: %s (not yet implemented)", portal.Script)
 				// TODO: Run portal script
 				return
@@ -371,63 +393,62 @@ func (h *Handler) handleUserTransferFieldRequest(reader *packet.Reader) {
 }
 
 func (h *Handler) transferToMap(mapID int32, portalName string) {
-	dm := wz.GetInstance()
-	if dm == nil {
+	if h.user == nil {
 		return
 	}
+	
+	char := h.character()
+	oldMapID := char.MapID
 
-	// Get destination map data
-	destMapData, err := dm.GetMapData(int(mapID))
-	if err != nil {
-		log.Printf("[Transfer] Failed to load destination map %d: %v", mapID, err)
-		return
-	}
-
-	// Find spawn portal
+	// Get or create destination stage
+	newStage := h.stageManager.GetOrCreate(mapID)
+	
+	// Spawn NPCs if needed
+	newStage.SpawnNPCs()
+	
+	// Find spawn portal position and index
 	var spawnPoint byte = 0
-	for i, p := range destMapData.Portals {
-		if p.Name == portalName || (portalName == "" && p.Type == 0) {
-			spawnPoint = byte(i)
-			h.posX = int16(p.X)
-			h.posY = int16(p.Y)
-			break
+	var posX, posY int16
+	
+	if newStage.MapData() != nil {
+		for i, p := range newStage.MapData().Portals {
+			if p.Name == portalName || (portalName == "" && p.Type == 0) {
+				spawnPoint = byte(i)
+				posX = int16(p.X)
+				posY = int16(p.Y)
+				break
+			}
 		}
 	}
 
-	// Update character position
-	oldMapID := h.character.MapID
-	h.character.MapID = mapID
-	h.character.SpawnPoint = spawnPoint
+	// Transfer user between stages
+	h.user.TransferToStage(newStage, portalName)
+	h.user.SetSpawnPoint(spawnPoint)
+	h.user.SetPosition(posX, posY)
 
-	// Increment field key
-	h.fieldKey++
-
-	// Clear spawned NPCs and drops from old map
-	h.spawnedNPCs = make(map[uint32]int)
-	h.fieldDrops = make(map[uint32]*FieldDrop)
-	h.nextObjectID = 1000
-
-	// Send SetField for new map (with quest and inventory data preserved)
-	if err := h.conn.Write(SetFieldPacketFull(h.character, int(h.config.ChannelID), h.fieldKey, h.getQuestData(), h.getInventoryData())); err != nil {
+	// Send SetField for new map
+	if err := h.conn.Write(SetFieldPacketFull(char, int(h.config.ChannelID), h.user.StageKey(), h.getQuestData(), h.getInventoryData())); err != nil {
 		log.Printf("[Transfer] Failed to send SetField: %v", err)
 		return
 	}
 
 	log.Printf("[Transfer] %s transferred from map %d to map %d (portal: %s)", 
-		h.character.Name, oldMapID, mapID, portalName)
+		char.Name, oldMapID, mapID, portalName)
 
-	// Spawn NPCs on new map
-	h.spawnMapNPCs(int(mapID))
+	// Send NPCs and drops to user
+	h.sendNPCsToUser()
+	h.sendDropsToUser()
 }
 
 func (h *Handler) handleUserPortalScriptRequest(reader *packet.Reader) {
-	if h.character == nil {
+	if h.user == nil {
 		return
 	}
+	char := h.character()
 
 	fieldKey := reader.ReadByte()
-	if h.fieldKey != fieldKey {
-		log.Printf("[Portal] Invalid field key: expected %d, got %d", h.fieldKey, fieldKey)
+	if h.user.StageKey() != fieldKey {
+		log.Printf("[Portal] Invalid field key: expected %d, got %d", h.user.StageKey(), fieldKey)
 		return
 	}
 
@@ -436,12 +457,12 @@ func (h *Handler) handleUserPortalScriptRequest(reader *packet.Reader) {
 	y := reader.ReadShort()
 
 	log.Printf("[Portal] %s triggered portal script '%s' at (%d, %d)", 
-		h.character.Name, portalName, x, y)
+		char.Name, portalName, x, y)
 
 	// Check for portal script - if script exists, it controls all behavior
 	scriptMgr := script.GetInstance()
 	if scriptMgr != nil {
-		if scriptContent, hasScript := scriptMgr.GetPortalScript(int(h.character.MapID), portalName); hasScript {
+		if scriptContent, hasScript := scriptMgr.GetPortalScript(int(char.MapID), portalName); hasScript {
 			log.Printf("[Portal] Running script for portal '%s'", portalName)
 			h.runPortalScript(scriptContent, portalName)
 			// Script controls everything - enable actions and return
@@ -450,19 +471,14 @@ func (h *Handler) handleUserPortalScriptRequest(reader *packet.Reader) {
 		}
 	}
 
-	// No script - check if this portal has a destination in WZ data
-	dm := wz.GetInstance()
-	if dm == nil {
-		return
-	}
-
-	mapData, err := dm.GetMapData(int(h.character.MapID))
-	if err != nil {
+	// No script - check if this portal has a destination in current stage
+	currentStage := h.currentStage()
+	if currentStage == nil || currentStage.MapData() == nil {
 		return
 	}
 
 	// Find the portal
-	for _, portal := range mapData.Portals {
+	for _, portal := range currentStage.MapData().Portals {
 		if portal.Name == portalName && portal.ToMap != 999999999 && portal.ToMap != -1 {
 			h.transferToMap(int32(portal.ToMap), portal.ToName)
 			return
@@ -481,7 +497,7 @@ func (h *Handler) runPortalScript(scriptContent, portalName string) {
 	sendPacketFn := func(p []byte) error {
 		return h.conn.Write(p)
 	}
-	script.RegisterPortalFunctions(L, h.character, sendPacketFn, func(mapID int, portal string) {
+	script.RegisterPortalFunctions(L, h.character(), sendPacketFn, func(mapID int, portal string) {
 		h.transferToMap(int32(mapID), portal)
 	})
 
@@ -494,7 +510,7 @@ func (h *Handler) runPortalScript(scriptContent, portalName string) {
 func (h *Handler) runQuestScript(scriptContent string, questID, npcID int) {
 	// Start NPC conversation for quest dialogue
 	npcCtx := script.GetNPCContext()
-	conv, err := npcCtx.StartConversationWithScript(npcID, h.character, func(p []byte) error {
+	conv, err := npcCtx.StartConversationWithScript(npcID, h.character(), func(p []byte) error {
 		return h.conn.Write(p)
 	}, scriptContent)
 	if err != nil {
@@ -504,7 +520,7 @@ func (h *Handler) runQuestScript(scriptContent string, questID, npcID int) {
 	}
 
 	// Set inventory manager for item operations
-	conv.Inventory = h.inventory
+	conv.Inventory = h.inventory()
 	
 	// Set EXP rate multipliers from config
 	conv.ExpRate = h.config.ExpRate
@@ -512,29 +528,25 @@ func (h *Handler) runQuestScript(scriptContent string, questID, npcID int) {
 
 	// Set quest callbacks for server-side tracking
 	conv.OnQuestStart = func(qID uint16) {
-		h.activeQuests[qID] = &QuestRecord{
-			State: QuestStatePerform,
-			Value: "",
-		}
-		delete(h.completedQuests, qID)
-		log.Printf("[Quest] Server tracking: started quest %d for %s", qID, h.character.Name)
+		h.user.SetActiveQuest(qID, stage.NewQuestRecord(qID, stage.QuestStatePerform))
+		h.user.RemoveActiveQuest(qID) // Remove from completed if re-starting
+		log.Printf("[Quest] Server tracking: started quest %d for %s", qID, h.character().Name)
 	}
 	conv.OnQuestComplete = func(qID uint16) {
-		h.completedQuests[qID] = &QuestRecord{
-			State:        QuestStateComplete,
-			CompleteTime: time.Now().UnixNano(),
-		}
-		delete(h.activeQuests, qID)
-		log.Printf("[Quest] Server tracking: completed quest %d for %s", qID, h.character.Name)
+		record := stage.NewQuestRecord(qID, stage.QuestStateComplete)
+		record.CompleteTime = time.Now().UnixNano()
+		h.user.SetCompletedQuest(qID, record)
+		h.user.RemoveActiveQuest(qID)
+		log.Printf("[Quest] Server tracking: completed quest %d for %s", qID, h.character().Name)
 	}
 
 	// Store the conversation and run in background
-	h.npcConversation = conv
+	h.user.SetNpcConversation(conv)
 	go conv.Run()
 }
 
 func (h *Handler) handleUserChat(reader *packet.Reader) {
-	if h.character == nil {
+	if h.user == nil {
 		return
 	}
 
@@ -542,10 +554,10 @@ func (h *Handler) handleUserChat(reader *packet.Reader) {
 	message := reader.ReadString()
 	onlyBalloon := reader.ReadBool() // Show only balloon (no text in chat)
 
-	log.Printf("[Chat] %s: %s", h.character.Name, message)
+	log.Printf("[Chat] %s: %s", h.character().Name, message)
 
 	// Send chat back to the user (and would broadcast to others in the field)
-	if err := h.conn.Write(UserChatPacket(h.character.ID, message, onlyBalloon, false)); err != nil {
+	if err := h.conn.Write(UserChatPacket(h.character().ID, message, onlyBalloon, false)); err != nil {
 		log.Printf("Failed to send chat: %v", err)
 	}
 
@@ -563,7 +575,7 @@ const (
 )
 
 func (h *Handler) handleUserQuestRequest(reader *packet.Reader) {
-	if h.character == nil {
+	if h.user == nil {
 		return
 	}
 
@@ -576,14 +588,14 @@ func (h *Handler) handleUserQuestRequest(reader *packet.Reader) {
 		npcID := reader.ReadInt()
 		itemID := reader.ReadInt()
 		log.Printf("[Quest] %s restoring lost item %d from quest %d (NPC %d)", 
-			h.character.Name, itemID, questID, npcID)
+			h.character().Name, itemID, questID, npcID)
 		// TODO: Implement item restoration
 
 	case QuestActionStart:
 		// Start a quest via NPC
 		npcID := reader.ReadInt()
 		log.Printf("[Quest] %s starting quest %d (NPC %d)", 
-			h.character.Name, questID, npcID)
+			h.character().Name, questID, npcID)
 		h.startQuest(questID, npcID)
 
 	case QuestActionComplete:
@@ -595,19 +607,19 @@ func (h *Handler) handleUserQuestRequest(reader *packet.Reader) {
 			selection = int32(reader.ReadInt())
 		}
 		log.Printf("[Quest] %s completing quest %d (NPC %d, selection %d)", 
-			h.character.Name, questID, npcID, selection)
+			h.character().Name, questID, npcID, selection)
 		h.completeQuest(questID, npcID, selection)
 
 	case QuestActionResign:
 		// Forfeit/resign from a quest
-		log.Printf("[Quest] %s forfeiting quest %d", h.character.Name, questID)
+		log.Printf("[Quest] %s forfeiting quest %d", h.character().Name, questID)
 		h.resignQuest(questID)
 
 	case QuestActionScriptStart:
 		// Start quest via script - requires quest script to handle dialogue
 		npcID := reader.ReadInt()
 		log.Printf("[Quest] %s script start quest %d (NPC %d)", 
-			h.character.Name, questID, npcID)
+			h.character().Name, questID, npcID)
 		scriptMgr := script.GetInstance()
 		if scriptMgr != nil {
 			if scriptContent, hasScript := scriptMgr.GetQuestStartScript(int(questID)); hasScript {
@@ -623,7 +635,7 @@ func (h *Handler) handleUserQuestRequest(reader *packet.Reader) {
 		// Complete quest via script - requires quest script to handle dialogue
 		npcID := reader.ReadInt()
 		log.Printf("[Quest] %s script end quest %d (NPC %d)", 
-			h.character.Name, questID, npcID)
+			h.character().Name, questID, npcID)
 		scriptMgr := script.GetInstance()
 		if scriptMgr != nil {
 			if scriptContent, hasScript := scriptMgr.GetQuestEndScript(int(questID)); hasScript {
@@ -644,15 +656,12 @@ func (h *Handler) startQuest(questID uint16, npcID uint32) {
 	// TODO: Validate quest requirements
 	
 	// Track quest in memory
-	h.activeQuests[questID] = &QuestRecord{
-		State: QuestStatePerform,
-		Value: "",
-	}
+	h.user.SetActiveQuest(questID, stage.NewQuestRecord(questID, stage.QuestStatePerform))
 	// Remove from completed if it was there (re-doing quest)
-	delete(h.completedQuests, questID)
+	h.user.RemoveCompletedQuest(questID)
 	
 	// Update quest record to "started" state
-	if err := h.conn.Write(MessageQuestRecordPacket(questID, QuestStatePerform, "", 0)); err != nil {
+	if err := h.conn.Write(MessageQuestRecordPacket(questID, stage.QuestStatePerform, "", 0)); err != nil {
 		log.Printf("Failed to send quest record update: %v", err)
 		return
 	}
@@ -674,15 +683,14 @@ func (h *Handler) startQuest(questID uint16, npcID uint32) {
 func (h *Handler) completeQuest(questID uint16, npcID uint32, selection int32) {
 	// Track quest completion in memory
 	completeTime := time.Now().UnixNano()
-	h.completedQuests[questID] = &QuestRecord{
-		State:        QuestStateComplete,
-		CompleteTime: completeTime,
-	}
+	record := stage.NewQuestRecord(questID, stage.QuestStateComplete)
+	record.CompleteTime = completeTime
+	h.user.SetCompletedQuest(questID, record)
 	// Remove from active
-	delete(h.activeQuests, questID)
+	h.user.RemoveActiveQuest(questID)
 	
 	// Update quest record to "complete" state
-	if err := h.conn.Write(MessageQuestRecordPacket(questID, QuestStateComplete, "", completeTime)); err != nil {
+	if err := h.conn.Write(MessageQuestRecordPacket(questID, stage.QuestStateComplete, "", completeTime)); err != nil {
 		log.Printf("Failed to send quest complete record: %v", err)
 		return
 	}
@@ -703,62 +711,62 @@ func (h *Handler) completeQuest(questID uint16, npcID uint32, selection int32) {
 
 func (h *Handler) resignQuest(questID uint16) {
 	// Remove from tracking
-	delete(h.activeQuests, questID)
+	h.user.RemoveActiveQuest(questID)
 	
 	// Update quest record to "none" state (delete)
-	if err := h.conn.Write(MessageQuestRecordPacket(questID, QuestStateNone, "", 0)); err != nil {
+	if err := h.conn.Write(MessageQuestRecordPacket(questID, stage.QuestStateNone, "", 0)); err != nil {
 		log.Printf("Failed to send quest resign record: %v", err)
 	}
 }
 
 func (h *Handler) giveQuestRewards(rewards *wz.QuestActData, isStart bool) {
-	if h.character == nil || rewards == nil {
+	if h.user == nil || rewards == nil {
 		return
 	}
 	
 	// Give EXP (with quest EXP rate multiplier)
 	if rewards.Exp > 0 {
 		expGain := int32(float64(rewards.Exp) * h.config.QuestExpRate)
-		h.character.EXP += expGain
+		h.character().EXP += expGain
 		
 		// Check for level up
-		oldLevel := h.character.Level
-		newLevel, newExp, levelsGained := exp.CalculateLevelUp(h.character.Level, h.character.EXP)
+		oldLevel := h.character().Level
+		newLevel, newExp, levelsGained := exp.CalculateLevelUp(h.character().Level, h.character().EXP)
 		
 		if levelsGained > 0 {
 			// Character leveled up!
-			h.character.Level = newLevel
-			h.character.EXP = newExp
+			h.character().Level = newLevel
+			h.character().EXP = newExp
 			
 			// Grant AP and SP per level (5 AP, 3 SP for beginners)
 			apGain := int16(levelsGained * 5)
 			spGain := int16(levelsGained * 3)
-			h.character.AP += apGain
-			h.character.SP += spGain
+			h.character().AP += apGain
+			h.character().SP += spGain
 			
 			// Increase MaxHP and MaxMP (simplified formula)
 			for i := 0; i < levelsGained; i++ {
-				h.character.MaxHP += 12 + int32(h.character.Level-byte(i))/5
-				h.character.MaxMP += 8 + int32(h.character.Level-byte(i))/5
+				h.character().MaxHP += 12 + int32(h.character().Level-byte(i))/5
+				h.character().MaxMP += 8 + int32(h.character().Level-byte(i))/5
 			}
 			
 			// Fully heal on level up
-			h.character.HP = h.character.MaxHP
-			h.character.MP = h.character.MaxMP
+			h.character().HP = h.character().MaxHP
+			h.character().MP = h.character().MaxMP
 			
 			log.Printf("[Quest] %s leveled up! %d -> %d (gained %d levels)", 
-				h.character.Name, oldLevel, newLevel, levelsGained)
+				h.character().Name, oldLevel, newLevel, levelsGained)
 			
 			// Send stat update for all level-up related stats
 			stats := map[uint32]int64{
-				StatLevel: int64(h.character.Level),
-				StatHP:    int64(h.character.HP),
-				StatMaxHP: int64(h.character.MaxHP),
-				StatMP:    int64(h.character.MP),
-				StatMaxMP: int64(h.character.MaxMP),
-				StatAP:    int64(h.character.AP),
-				StatSP:    int64(h.character.SP),
-				StatEXP:   int64(h.character.EXP),
+				StatLevel: int64(h.character().Level),
+				StatHP:    int64(h.character().HP),
+				StatMaxHP: int64(h.character().MaxHP),
+				StatMP:    int64(h.character().MP),
+				StatMaxMP: int64(h.character().MaxMP),
+				StatAP:    int64(h.character().AP),
+				StatSP:    int64(h.character().SP),
+				StatEXP:   int64(h.character().EXP),
 			}
 			if err := h.conn.Write(StatChangedPacket(true, stats)); err != nil {
 				log.Printf("Failed to send level up stat change: %v", err)
@@ -770,7 +778,7 @@ func (h *Handler) giveQuestRewards(rewards *wz.QuestActData, isStart bool) {
 			}
 		} else {
 			// No level up, just send EXP update
-			stats := map[uint32]int64{StatEXP: int64(h.character.EXP)}
+			stats := map[uint32]int64{StatEXP: int64(h.character().EXP)}
 			if err := h.conn.Write(StatChangedPacket(true, stats)); err != nil {
 				log.Printf("Failed to send EXP stat change: %v", err)
 			}
@@ -781,15 +789,15 @@ func (h *Handler) giveQuestRewards(rewards *wz.QuestActData, isStart bool) {
 			log.Printf("Failed to send EXP message: %v", err)
 		}
 		
-		log.Printf("[Quest] Gave %d EXP to %s (base: %d, rate: %.1fx)", expGain, h.character.Name, rewards.Exp, h.config.QuestExpRate)
+		log.Printf("[Quest] Gave %d EXP to %s (base: %d, rate: %.1fx)", expGain, h.character().Name, rewards.Exp, h.config.QuestExpRate)
 	}
 	
 	// Give Meso
 	if rewards.Money > 0 {
-		h.character.Meso += rewards.Money
+		h.character().Meso += rewards.Money
 		
 		// Send stat update
-		stats := map[uint32]int64{StatMoney: int64(h.character.Meso)}
+		stats := map[uint32]int64{StatMoney: int64(h.character().Meso)}
 		if err := h.conn.Write(StatChangedPacket(true, stats)); err != nil {
 			log.Printf("Failed to send Meso stat change: %v", err)
 		}
@@ -799,15 +807,15 @@ func (h *Handler) giveQuestRewards(rewards *wz.QuestActData, isStart bool) {
 			log.Printf("Failed to send Meso message: %v", err)
 		}
 		
-		log.Printf("[Quest] Gave %d Meso to %s", rewards.Money, h.character.Name)
+		log.Printf("[Quest] Gave %d Meso to %s", rewards.Money, h.character().Name)
 	}
 	
 	// Give Fame
 	if rewards.Pop > 0 {
-		h.character.Fame += int16(rewards.Pop)
+		h.character().Fame += int16(rewards.Pop)
 		
 		// Send stat update
-		stats := map[uint32]int64{StatPOP: int64(h.character.Fame)}
+		stats := map[uint32]int64{StatPOP: int64(h.character().Fame)}
 		if err := h.conn.Write(StatChangedPacket(true, stats)); err != nil {
 			log.Printf("Failed to send Fame stat change: %v", err)
 		}
@@ -817,7 +825,7 @@ func (h *Handler) giveQuestRewards(rewards *wz.QuestActData, isStart bool) {
 			log.Printf("Failed to send Fame message: %v", err)
 		}
 		
-		log.Printf("[Quest] Gave %d Fame to %s", rewards.Pop, h.character.Name)
+		log.Printf("[Quest] Gave %d Fame to %s", rewards.Pop, h.character().Name)
 	}
 	
 	// TODO: Give items (requires inventory system)
@@ -836,7 +844,7 @@ func (h *Handler) giveQuestRewards(rewards *wz.QuestActData, isStart bool) {
 // Stat Change Handlers
 
 func (h *Handler) handleUserChangeStatRequest(reader *packet.Reader) {
-	if h.character == nil {
+	if h.user == nil {
 		return
 	}
 
@@ -856,27 +864,27 @@ func (h *Handler) handleUserChangeStatRequest(reader *packet.Reader) {
 	stats := make(map[uint32]int64)
 
 	if hpToAdd > 0 {
-		newHP := h.character.HP + hpToAdd
-		if newHP > h.character.MaxHP {
-			newHP = h.character.MaxHP
+		newHP := h.character().HP + hpToAdd
+		if newHP > h.character().MaxHP {
+			newHP = h.character().MaxHP
 		}
-		h.character.HP = newHP
-		stats[StatHP] = int64(h.character.HP)
+		h.character().HP = newHP
+		stats[StatHP] = int64(h.character().HP)
 	}
 
 	if mpToAdd > 0 {
-		newMP := h.character.MP + mpToAdd
-		if newMP > h.character.MaxMP {
-			newMP = h.character.MaxMP
+		newMP := h.character().MP + mpToAdd
+		if newMP > h.character().MaxMP {
+			newMP = h.character().MaxMP
 		}
-		h.character.MP = newMP
-		stats[StatMP] = int64(h.character.MP)
+		h.character().MP = newMP
+		stats[StatMP] = int64(h.character().MP)
 	}
 
 	if len(stats) > 0 {
 		log.Printf("[Stats] %s recovered HP:%d MP:%d (now HP:%d/%d MP:%d/%d)", 
-			h.character.Name, hpToAdd, mpToAdd, 
-			h.character.HP, h.character.MaxHP, h.character.MP, h.character.MaxMP)
+			h.character().Name, hpToAdd, mpToAdd, 
+			h.character().HP, h.character().MaxHP, h.character().MP, h.character().MaxMP)
 
 		if err := h.conn.Write(StatChangedPacket(true, stats)); err != nil {
 			log.Printf("Failed to send stat change: %v", err)
@@ -887,7 +895,7 @@ func (h *Handler) handleUserChangeStatRequest(reader *packet.Reader) {
 // NPC Script Handlers
 
 func (h *Handler) handleUserSelectNpc(reader *packet.Reader) {
-	if h.character == nil {
+	if h.user == nil {
 		return
 	}
 
@@ -895,10 +903,16 @@ func (h *Handler) handleUserSelectNpc(reader *packet.Reader) {
 	x := reader.ReadShort()
 	y := reader.ReadShort()
 
-	log.Printf("[NPC] %s selected NPC object %d at (%d, %d)", h.character.Name, objectID, x, y)
+	log.Printf("[NPC] %s selected NPC object %d at (%d, %d)", h.character().Name, objectID, x, y)
 
-	// Get NPC template ID from our spawned NPCs map
-	npcID, ok := h.spawnedNPCs[objectID]
+	// Get NPC template ID from current stage's NPC manager
+	currentStage := h.currentStage()
+	if currentStage == nil {
+		log.Printf("[NPC] No current stage")
+		return
+	}
+	
+	npcID, ok := currentStage.Npcs().GetTemplateIDByObjectID(objectID)
 	if !ok {
 		log.Printf("[NPC] Unknown NPC object %d", objectID)
 		return
@@ -919,7 +933,7 @@ func (h *Handler) handleUserSelectNpc(reader *packet.Reader) {
 
 	// Start conversation
 	ctx := script.GetNPCContext()
-	conv, err := ctx.StartConversation(npcID, h.character, func(data []byte) error {
+	conv, err := ctx.StartConversation(npcID, h.character(), func(data []byte) error {
 		return h.conn.Write(packet.Packet(data))
 	})
 	if err != nil {
@@ -928,7 +942,7 @@ func (h *Handler) handleUserSelectNpc(reader *packet.Reader) {
 	}
 
 	// Set inventory manager for item operations
-	conv.Inventory = h.inventory
+	conv.Inventory = h.inventory()
 	
 	// Set EXP rate multipliers from config
 	conv.ExpRate = h.config.ExpRate
@@ -939,26 +953,26 @@ func (h *Handler) handleUserSelectNpc(reader *packet.Reader) {
 }
 
 func (h *Handler) handleUserScriptMessageAnswer(reader *packet.Reader) {
-	if h.character == nil {
+	if h.user == nil {
 		return
 	}
 
 	msgType := reader.ReadByte()
 	action := reader.ReadByte() // -1 = end chat, 0 = prev/no, 1 = next/yes/ok
 	
-	log.Printf("[NPC] Script answer from %s: type=%d action=%d", h.character.Name, msgType, action)
+	log.Printf("[NPC] Script answer from %s: type=%d action=%d", h.character().Name, msgType, action)
 
 	ctx := script.GetNPCContext()
-	conv := ctx.GetConversation(h.character.ID)
+	conv := ctx.GetConversation(h.character().ID)
 	if conv == nil {
-		log.Printf("[NPC] No active conversation for %s", h.character.Name)
+		log.Printf("[NPC] No active conversation for %s", h.character().Name)
 		return
 	}
 
 	// Check if player ended the chat
 	if action == 255 || action == 0xFF { // -1 as unsigned byte
 		conv.HandleResponse(script.NPCMessageNone, 0, "", true)
-		ctx.EndConversation(h.character.ID)
+		ctx.EndConversation(h.character().ID)
 		return
 	}
 
@@ -973,7 +987,7 @@ func (h *Handler) handleUserScriptMessageAnswer(reader *packet.Reader) {
 	case script.NPCMessageMenu:
 		if action == 0 { // End chat on menu
 			conv.HandleResponse(script.NPCMessageNone, 0, "", true)
-			ctx.EndConversation(h.character.ID)
+			ctx.EndConversation(h.character().ID)
 			return
 		}
 		selection = int(reader.ReadInt()) // Selection index
@@ -990,7 +1004,7 @@ func (h *Handler) handleUserScriptMessageAnswer(reader *packet.Reader) {
 
 // handleUserChangeSlotPositionRequest handles item moving/dropping
 func (h *Handler) handleUserChangeSlotPositionRequest(reader *packet.Reader) {
-	if h.character == nil || h.inventory == nil {
+	if h.user == nil || h.inventory() == nil {
 		return
 	}
 	
@@ -1001,12 +1015,12 @@ func (h *Handler) handleUserChangeSlotPositionRequest(reader *packet.Reader) {
 	quantity := int16(reader.ReadShort())
 	
 	log.Printf("[Inventory] %s move/drop: type=%d src=%d dest=%d qty=%d", 
-		h.character.Name, invType, srcSlot, destSlot, quantity)
+		h.character().Name, invType, srcSlot, destSlot, quantity)
 	
 	// Check if this is a drop (destSlot = 0)
 	if destSlot == 0 {
 		// Get item info before removing
-		item := h.inventory.GetItemBySlot(invType, srcSlot)
+		item := h.inventory().GetItemBySlot(invType, srcSlot)
 		if item == nil {
 			log.Printf("[Inventory] Drop failed: no item at slot %d", srcSlot)
 			h.conn.Write(EnableActionsPacket())
@@ -1020,7 +1034,7 @@ func (h *Handler) handleUserChangeSlotPositionRequest(reader *packet.Reader) {
 		}
 		
 		// Remove from inventory
-		operations, err := h.inventory.MoveItem(invType, srcSlot, destSlot, quantity)
+		operations, err := h.inventory().MoveItem(invType, srcSlot, destSlot, quantity)
 		if err != nil {
 			log.Printf("[Inventory] Drop failed: %v", err)
 			h.conn.Write(EnableActionsPacket())
@@ -1040,7 +1054,7 @@ func (h *Handler) handleUserChangeSlotPositionRequest(reader *packet.Reader) {
 	}
 	
 	// Handle the move
-	operations, err := h.inventory.MoveItem(invType, srcSlot, destSlot, quantity)
+	operations, err := h.inventory().MoveItem(invType, srcSlot, destSlot, quantity)
 	if err != nil {
 		log.Printf("[Inventory] Move failed: %v", err)
 		h.conn.Write(EnableActionsPacket())
@@ -1057,42 +1071,40 @@ func (h *Handler) handleUserChangeSlotPositionRequest(reader *packet.Reader) {
 
 // spawnDrop creates a drop on the ground near the player
 func (h *Handler) spawnDrop(itemID int32, quantity int16) {
-	if h.character == nil {
+	if h.user == nil {
 		return
 	}
 	
-	// Create drop object
-	objectID := h.nextObjectID
-	h.nextObjectID++
-	
-	// Drop at player's exact position - client handles the visual falling
-	// The drop lands where the player is standing
-	drop := &FieldDrop{
-		ObjectID: objectID,
-		ItemID:   itemID,
-		Quantity: quantity,
-		X:        h.posX,
-		Y:        h.posY,
-		OwnerID:  h.character.ID,
-		DropTime: time.Now().Unix(),
+	currentStage := h.currentStage()
+	if currentStage == nil {
+		return
 	}
 	
-	h.fieldDrops[objectID] = drop
+	// Get player position
+	posX, posY := h.user.Position()
 	
-	log.Printf("[Drop] Spawned drop %d: item %d x%d at (%d, %d)", objectID, itemID, quantity, drop.X, drop.Y)
+	// Create drop using stage's drop manager
+	drop := currentStage.AddDrop(itemID, quantity, posX, posY, h.character().ID)
+	
+	log.Printf("[Drop] Spawned drop %d: item %d x%d at (%d, %d)", drop.ObjectID, itemID, quantity, drop.X, drop.Y)
 	
 	// Send drop packet to client
 	// Type 0 (JUST_SHOWING) = instant appear at position (best for player drops)
 	// Type 1 (CREATE) = falls from source to destination (for mob drops)
 	// Type 3 (FADING_OUT) = disappears immediately (quest items)
-	if err := h.conn.Write(DropEnterFieldPacket(drop, h.posX, h.posY, DropEnterCreate)); err != nil {
+	if err := h.conn.Write(DropEnterFieldPacket(drop, posX, posY, DropEnterCreate)); err != nil {
 		log.Printf("[Drop] Failed to send drop packet: %v", err)
 	}
 }
 
 // handleDropPickUpRequest handles picking up dropped items
 func (h *Handler) handleDropPickUpRequest(reader *packet.Reader) {
-	if h.character == nil || h.inventory == nil {
+	if h.user == nil || h.inventory() == nil {
+		return
+	}
+	
+	currentStage := h.currentStage()
+	if currentStage == nil {
 		return
 	}
 	
@@ -1103,18 +1115,18 @@ func (h *Handler) handleDropPickUpRequest(reader *packet.Reader) {
 	objectID := reader.ReadInt()
 	_ = reader.ReadInt()     // dwCrc
 	
-	log.Printf("[Drop] %s picking up drop %d", h.character.Name, objectID)
+	log.Printf("[Drop] %s picking up drop %d", h.character().Name, objectID)
 	
-	// Find the drop
-	drop, exists := h.fieldDrops[uint32(objectID)]
-	if !exists {
+	// Find and remove the drop from stage
+	drop := currentStage.Drops().Remove(uint32(objectID))
+	if drop == nil {
 		log.Printf("[Drop] Drop %d not found", objectID)
 		h.conn.Write(EnableActionsPacket())
 		return
 	}
 	
 	// Add item to inventory
-	operations, err := h.inventory.AddItem(drop.ItemID, drop.Quantity)
+	operations, err := h.inventory().AddItem(drop.ItemID, drop.Quantity)
 	if err != nil {
 		log.Printf("[Drop] Failed to add item to inventory: %v", err)
 		// Send pickup failed message
@@ -1134,18 +1146,17 @@ func (h *Handler) handleDropPickUpRequest(reader *packet.Reader) {
 		log.Printf("[Drop] Failed to send pickup message: %v", err)
 	}
 	
-	// Remove drop from field
-	if err := h.conn.Write(DropLeaveFieldPacket(uint32(objectID), DropLeavePickUp, h.character.ID, 0)); err != nil {
+	// Remove drop from field (notify client)
+	if err := h.conn.Write(DropLeaveFieldPacket(uint32(objectID), DropLeavePickUp, h.character().ID, 0)); err != nil {
 		log.Printf("[Drop] Failed to send drop leave packet: %v", err)
 	}
 	
-	delete(h.fieldDrops, uint32(objectID))
-	log.Printf("[Drop] %s picked up item %d x%d", h.character.Name, drop.ItemID, drop.Quantity)
+	log.Printf("[Drop] %s picked up item %d x%d", h.character().Name, drop.ItemID, drop.Quantity)
 }
 
 // handleUserStatChangeItemUseRequest handles using consumable items (HP/MP potions, etc.)
 func (h *Handler) handleUserStatChangeItemUseRequest(reader *packet.Reader) {
-	if h.character == nil || h.inventory == nil {
+	if h.user == nil || h.inventory() == nil {
 		return
 	}
 	
@@ -1153,10 +1164,10 @@ func (h *Handler) handleUserStatChangeItemUseRequest(reader *packet.Reader) {
 	slot := int16(reader.ReadShort())
 	itemID := reader.ReadInt()
 	
-	log.Printf("[Inventory] %s use item: slot=%d itemID=%d", h.character.Name, slot, itemID)
+	log.Printf("[Inventory] %s use item: slot=%d itemID=%d", h.character().Name, slot, itemID)
 	
 	// Verify the item exists at that slot
-	item := h.inventory.GetItemBySlot(models.InventoryConsume, slot)
+	item := h.inventory().GetItemBySlot(models.InventoryConsume, slot)
 	if item == nil || item.ItemID != int32(itemID) {
 		log.Printf("[Inventory] Item mismatch or not found at slot %d", slot)
 		h.conn.Write(EnableActionsPacket())
@@ -1167,7 +1178,7 @@ func (h *Handler) handleUserStatChangeItemUseRequest(reader *packet.Reader) {
 	hpRecover, mpRecover := h.getItemRecoveryAmounts(int32(itemID))
 	
 	// Use the item (decrements quantity)
-	operation, err := h.inventory.UseItem(models.InventoryConsume, slot)
+	operation, err := h.inventory().UseItem(models.InventoryConsume, slot)
 	if err != nil {
 		log.Printf("[Inventory] Use item failed: %v", err)
 		h.conn.Write(EnableActionsPacket())
@@ -1178,23 +1189,23 @@ func (h *Handler) handleUserStatChangeItemUseRequest(reader *packet.Reader) {
 	statChanges := make(map[uint32]int64)
 	
 	if hpRecover > 0 {
-		h.character.HP += hpRecover
-		if h.character.HP > h.character.MaxHP {
-			h.character.HP = h.character.MaxHP
+		h.character().HP += hpRecover
+		if h.character().HP > h.character().MaxHP {
+			h.character().HP = h.character().MaxHP
 		}
-		statChanges[StatHP] = int64(h.character.HP)
+		statChanges[StatHP] = int64(h.character().HP)
 		log.Printf("[Inventory] %s recovered %d HP (now %d/%d)", 
-			h.character.Name, hpRecover, h.character.HP, h.character.MaxHP)
+			h.character().Name, hpRecover, h.character().HP, h.character().MaxHP)
 	}
 	
 	if mpRecover > 0 {
-		h.character.MP += mpRecover
-		if h.character.MP > h.character.MaxMP {
-			h.character.MP = h.character.MaxMP
+		h.character().MP += mpRecover
+		if h.character().MP > h.character().MaxMP {
+			h.character().MP = h.character().MaxMP
 		}
-		statChanges[StatMP] = int64(h.character.MP)
+		statChanges[StatMP] = int64(h.character().MP)
 		log.Printf("[Inventory] %s recovered %d MP (now %d/%d)", 
-			h.character.Name, mpRecover, h.character.MP, h.character.MaxMP)
+			h.character().Name, mpRecover, h.character().MP, h.character().MaxMP)
 	}
 	
 	// Send inventory update
@@ -1233,10 +1244,10 @@ func (h *Handler) getItemRecoveryAmounts(itemID int32) (hpRecover, mpRecover int
 	
 	// Add percentage-based recovery if applicable
 	if hpR > 0 && h.character != nil {
-		hpRecover += (h.character.MaxHP * hpR) / 100
+		hpRecover += (h.character().MaxHP * hpR) / 100
 	}
 	if mpR > 0 && h.character != nil {
-		mpRecover += (h.character.MaxMP * mpR) / 100
+		mpRecover += (h.character().MaxMP * mpR) / 100
 	}
 	
 	// Log the final recovery values

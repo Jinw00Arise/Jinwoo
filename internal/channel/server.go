@@ -6,18 +6,25 @@ import (
 
 	"github.com/Jinw00Arise/Jinwoo/config"
 	"github.com/Jinw00Arise/Jinwoo/internal/database/repository"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/stage"
 	"github.com/Jinw00Arise/Jinwoo/internal/network"
 )
 
 type Server struct {
-	config      *config.ChannelConfig
-	characters  *repository.CharacterRepository
-	inventories *repository.InventoryRepository
-	listener    net.Listener
+	config       *config.ChannelConfig
+	characters   *repository.CharacterRepository
+	inventories  *repository.InventoryRepository
+	stageManager *stage.StageManager
+	listener     net.Listener
 }
 
 func NewServer(cfg *config.ChannelConfig, characters *repository.CharacterRepository, inventories *repository.InventoryRepository) *Server {
-	return &Server{config: cfg, characters: characters, inventories: inventories}
+	return &Server{
+		config:       cfg,
+		characters:   characters,
+		inventories:  inventories,
+		stageManager: stage.NewStageManager(),
+	}
 }
 
 func (s *Server) Start() error {
@@ -56,7 +63,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		return
 	}
 
-	handler := NewHandler(c, s.config, s.characters, s.inventories)
+	handler := NewHandler(c, s.config, s.characters, s.inventories, s.stageManager)
 
 	for {
 		p, err := c.Read()
@@ -64,9 +71,16 @@ func (s *Server) handleConnection(conn net.Conn) {
 			if err.Error() != "EOF" {
 				log.Printf("Read error: %v", err)
 			}
+			// Clean up user from stage on disconnect
+			handler.OnDisconnect()
 			return
 		}
 		handler.Handle(p)
 	}
+}
+
+// StageManager returns the server's stage manager
+func (s *Server) StageManager() *stage.StageManager {
+	return s.stageManager
 }
 

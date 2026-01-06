@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Jinw00Arise/Jinwoo/internal/database/models"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/stage"
 	"github.com/Jinw00Arise/Jinwoo/internal/packet"
 	"github.com/Jinw00Arise/Jinwoo/pkg/maple"
 )
@@ -777,7 +778,7 @@ const (
 )
 
 // DropEnterFieldPacket creates a packet to spawn a drop on the ground
-func DropEnterFieldPacket(drop *FieldDrop, startX, startY int16, enterType byte) packet.Packet {
+func DropEnterFieldPacket(drop *stage.Drop, startX, startY int16, enterType byte) packet.Packet {
 	p := packet.NewWithOpcode(maple.SendDropEnterField)
 	
 	p.WriteByte(enterType)            // nEnterType
