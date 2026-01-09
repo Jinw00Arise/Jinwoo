@@ -92,12 +92,20 @@ func CheckUserLimitResultPacket(status byte) packet.Packet {
 }
 
 func SelectWorldResultPacket(characters []*models.Character, charSlots int) packet.Packet {
+	return SelectWorldResultPacketWithEquips(characters, nil, charSlots)
+}
+
+func SelectWorldResultPacketWithEquips(characters []*models.Character, charEquips map[uint][]*models.Inventory, charSlots int) packet.Packet {
 	p := packet.NewWithOpcode(maple.SendSelectWorldResult)
 	p.WriteByte(0) // Success
 
 	p.WriteByte(byte(len(characters)))
 	for _, char := range characters {
-		writeAvatarData(&p, char)
+		var equips []*models.Inventory
+		if charEquips != nil {
+			equips = charEquips[char.ID]
+		}
+		writeAvatarDataWithEquips(&p, char, equips)
 		p.WriteByte(0) // m_abOnFamily (false)
 		p.WriteByte(0) // hasRank (false - no ranking)
 	}
@@ -111,6 +119,11 @@ func SelectWorldResultPacket(characters []*models.Character, charSlots int) pack
 
 // writeAvatarData writes CharacterStat + AvatarLook (without ranking - that's separate)
 func writeAvatarData(p *packet.Packet, char *models.Character) {
+	writeAvatarDataWithEquips(p, char, nil)
+}
+
+// writeAvatarDataWithEquips writes CharacterStat + AvatarLook with equipped items
+func writeAvatarDataWithEquips(p *packet.Packet, char *models.Character, equips []*models.Inventory) {
 	// CharacterStat
 	p.WriteInt(uint32(char.ID))
 	writeFixedString(p, char.Name, 13)
@@ -145,24 +158,49 @@ func writeAvatarData(p *packet.Packet, char *models.Character) {
 	p.WriteShort(0)                 // nSubJob
 
 	// AvatarLook
-	writeAvatarLook(p, char)
+	writeAvatarLookWithEquips(p, char, equips)
 }
 
 func writeAvatarLook(p *packet.Packet, char *models.Character) {
+	writeAvatarLookWithEquips(p, char, nil)
+}
+
+func writeAvatarLookWithEquips(p *packet.Packet, char *models.Character, equips []*models.Inventory) {
 	p.WriteByte(char.Gender)
 	p.WriteByte(char.SkinColor)
 	p.WriteInt(uint32(char.Face))
 
-	// anHairEquip
-	p.WriteByte(0) // Start marker
+	// anHairEquip - first write hair, then equipped items
+	p.WriteByte(0) // Hair slot (0)
 	p.WriteInt(uint32(char.Hair))
-	// [equipped items would go here: byte slot, int itemId]
+	
+	// Write equipped items (slot, itemId pairs)
+	// Slot mapping: -5 = top (5), -6 = bottom (6), -7 = shoes (7), -11 = weapon (11)
+	if equips != nil {
+		for _, item := range equips {
+			if item.Slot < 0 && item.Slot > -100 { // Regular equip slots
+				slot := byte(-item.Slot) // Convert negative slot to positive
+				p.WriteByte(slot)
+				p.WriteInt(uint32(item.ItemID))
+			}
+		}
+	}
 	p.WriteByte(0xFF) // End hairEquip (-1)
 
 	// anUnseenEquip (cash items that override regular equips)
-	// [cash items would go here: byte slot, int itemId]
+	// Cash items use slots -100 to -199
+	if equips != nil {
+		for _, item := range equips {
+			if item.Slot <= -100 { // Cash equip slots
+				slot := byte(-(item.Slot + 100)) // Convert to visible slot
+				p.WriteByte(slot)
+				p.WriteInt(uint32(item.ItemID))
+			}
+		}
+	}
 	p.WriteByte(0xFF) // End unseenEquip (-1)
 
+	// Find weapon for sticker ID (if it's a cash weapon)
 	p.WriteInt(0) // nWeaponStickerId
 
 	// anPetID (3 pet item IDs)
@@ -194,10 +232,14 @@ func CheckDuplicatedIDResultPacket(name string, available bool) packet.Packet {
 }
 
 func CreateNewCharacterResultPacket(success bool, char *models.Character) packet.Packet {
+	return CreateNewCharacterResultPacketWithEquips(success, char, nil)
+}
+
+func CreateNewCharacterResultPacketWithEquips(success bool, char *models.Character, equips []*models.Inventory) packet.Packet {
 	p := packet.NewWithOpcode(maple.SendCreateNewCharacterResult)
 	if success && char != nil {
 		p.WriteByte(0) // Success
-		writeAvatarData(&p, char)
+		writeAvatarDataWithEquips(&p, char, equips)
 	} else {
 		p.WriteByte(1) // Failed
 	}

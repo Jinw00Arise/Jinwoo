@@ -2,8 +2,34 @@ package crypto
 
 import (
 	"bytes"
+	"os"
 	"testing"
 )
+
+func TestMain(m *testing.M) {
+	// Initialize crypto before running tests
+	if err := Init(); err != nil {
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
+
+func TestInit(t *testing.T) {
+	// Init should succeed
+	if err := Init(); err != nil {
+		t.Fatalf("Init() failed: %v", err)
+	}
+	
+	// Second call should also succeed (idempotent)
+	if err := Init(); err != nil {
+		t.Fatalf("Second Init() failed: %v", err)
+	}
+	
+	// Should be initialized
+	if !IsInitialized() {
+		t.Error("IsInitialized() should return true after Init()")
+	}
+}
 
 func TestShandaEncryptDecrypt(t *testing.T) {
 	tests := []struct {

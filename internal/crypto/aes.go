@@ -3,6 +3,8 @@ package crypto
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"errors"
+	"sync"
 )
 
 var (
@@ -14,20 +16,39 @@ var (
 		0x33, 0x00, 0x00, 0x00, 0x52, 0x00, 0x00, 0x00,
 	}
 
-	aesCipher cipher.Block
+	aesCipher   cipher.Block
+	initOnce    sync.Once
+	initialized bool
 )
 
-func init() {
-	var err error
-	aesCipher, err = aes.NewCipher(mapleAESKey)
-	if err != nil {
-		panic("failed to initialize AES cipher: " + err.Error())
-	}
+// ErrNotInitialized is returned when crypto functions are called before Init()
+var ErrNotInitialized = errors.New("crypto: AES cipher not initialized, call Init() first")
+
+// Init initializes the AES cipher. Must be called before using crypto functions.
+// Safe to call multiple times - only the first call has effect.
+func Init() error {
+	var initErr error
+	initOnce.Do(func() {
+		aesCipher, initErr = aes.NewCipher(mapleAESKey)
+		if initErr == nil {
+			initialized = true
+		}
+	})
+	return initErr
+}
+
+// IsInitialized returns true if the crypto package has been initialized
+func IsInitialized() bool {
+	return initialized
 }
 
 // AESCrypt applies MapleStory's OFB-like AES mode. Same function encrypts and decrypts.
 // Uses variable block sizes: first 0x5B0 bytes, then 0x5B4 for subsequent blocks.
+// Panics if Init() has not been called - this indicates a programming error.
 func AESCrypt(data []byte, iv []byte) {
+	if !initialized {
+		panic(ErrNotInitialized)
+	}
 	remaining := len(data)
 	blockSize := 0x5B0
 	start := 0

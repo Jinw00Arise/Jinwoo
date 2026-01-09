@@ -68,17 +68,17 @@ func (dm *DropManager) Clear() {
 	dm.drops = make(map[uint32]*Drop)
 }
 
-// GetExpired returns drops older than the specified duration
-func (dm *DropManager) GetExpired(maxAge time.Duration) []*Drop {
-	dm.mu.RLock()
-	defer dm.mu.RUnlock()
+// GetExpired returns and removes drops older than the specified duration
+func (dm *DropManager) GetExpired(now time.Time, expireTime time.Duration) []*Drop {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
 	
-	now := time.Now()
 	expired := make([]*Drop, 0)
 	
-	for _, drop := range dm.drops {
-		if now.Sub(drop.DropTime) > maxAge {
+	for objectID, drop := range dm.drops {
+		if now.Sub(drop.DropTime) > expireTime {
 			expired = append(expired, drop)
+			delete(dm.drops, objectID)
 		}
 	}
 	return expired

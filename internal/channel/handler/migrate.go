@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"log"
 
 	"github.com/Jinw00Arise/Jinwoo/internal/database/repository"
@@ -47,7 +48,7 @@ func (h *MigrateHandler) Handle(s game.Session, reader *packet.Reader) {
 	log.Printf("MigrateIn: character %d", characterID)
 
 	// Load character from database
-	charModel, err := h.characters.FindByID(uint(characterID))
+	charModel, err := h.characters.FindByID(context.Background(), uint(characterID))
 	if err != nil {
 		log.Printf("Failed to load character %d: %v", characterID, err)
 		return

@@ -1,6 +1,7 @@
 package login
 
 import (
+	"context"
 	"errors"
 	"log"
 	"strconv"
@@ -13,6 +14,12 @@ import (
 	"github.com/Jinw00Arise/Jinwoo/pkg/maple"
 )
 
+// ctx returns a background context for database operations
+// TODO: Propagate context from connection lifecycle
+func ctx() context.Context {
+	return context.Background()
+}
+
 var autoRegister bool
 
 func SetAutoRegister(enabled bool) {
@@ -20,10 +27,11 @@ func SetAutoRegister(enabled bool) {
 }
 
 type Handler struct {
-	conn       *network.Connection
-	config     *config.LoginConfig
-	accounts   *repository.AccountRepository
-	characters *repository.CharacterRepository
+	conn        *network.Connection
+	config      *config.LoginConfig
+	accounts    *repository.AccountRepository
+	characters  *repository.CharacterRepository
+	inventories *repository.InventoryRepository
 
 	accountID uint
 	worldID   byte
@@ -31,13 +39,14 @@ type Handler struct {
 	charSlots int
 }
 
-func NewHandler(conn *network.Connection, cfg *config.LoginConfig, accounts *repository.AccountRepository, characters *repository.CharacterRepository) *Handler {
+func NewHandler(conn *network.Connection, cfg *config.LoginConfig, accounts *repository.AccountRepository, characters *repository.CharacterRepository, inventories *repository.InventoryRepository) *Handler {
 	return &Handler{
-		conn:       conn,
-		config:     cfg,
-		accounts:   accounts,
-		characters: characters,
-		charSlots:  3,
+		conn:        conn,
+		config:      cfg,
+		accounts:    accounts,
+		characters:  characters,
+		inventories: inventories,
+		charSlots:   3,
 	}
 }
 
@@ -78,11 +87,11 @@ func (h *Handler) handleCheckPassword(reader *packet.Reader) {
 
 	log.Printf("Login: %s", username)
 
-	account, err := h.accounts.FindByUsername(username)
+	account, err := h.accounts.FindByUsername(ctx(), username)
 	if err != nil {
 		if errors.Is(err, repository.ErrAccountNotFound) {
 			if autoRegister {
-				account, err = h.accounts.Create(username, password)
+				account, err = h.accounts.Create(ctx(), username, password)
 				if err != nil {
 					log.Printf("Failed to create account: %v", err)
 					h.conn.Write(LoginFailPacket(maple.LoginSystemError))
@@ -149,13 +158,24 @@ func (h *Handler) handleSelectWorld(reader *packet.Reader) {
 	h.worldID = reader.ReadByte()
 	h.channelID = reader.ReadByte()
 
-	characters, err := h.characters.FindByAccountID(h.accountID, h.worldID)
+	characters, err := h.characters.FindByAccountID(ctx(), h.accountID, h.worldID)
 	if err != nil {
 		log.Printf("Failed to load characters: %v", err)
 		characters = nil
 	}
 
-	if err := h.conn.Write(SelectWorldResultPacket(characters, h.charSlots)); err != nil {
+	// Load equipped items for each character
+	charEquips := make(map[uint][]*models.Inventory)
+	for _, char := range characters {
+		equips, err := h.inventories.FindByCharacterAndType(ctx(), char.ID, models.InventoryEquipped)
+		if err != nil {
+			log.Printf("Failed to load equipped items for char %d: %v", char.ID, err)
+			continue
+		}
+		charEquips[char.ID] = equips
+	}
+
+	if err := h.conn.Write(SelectWorldResultPacketWithEquips(characters, charEquips, h.charSlots)); err != nil {
 		log.Printf("Failed to send character list: %v", err)
 	}
 }
@@ -163,7 +183,7 @@ func (h *Handler) handleSelectWorld(reader *packet.Reader) {
 func (h *Handler) handleCheckDuplicatedID(reader *packet.Reader) {
 	name := reader.ReadString()
 
-	exists, err := h.characters.NameExists(name)
+	exists, err := h.characters.NameExists(ctx(), name)
 	if err != nil {
 		log.Printf("Failed to check character name: %v", err)
 		h.conn.Write(CheckDuplicatedIDResultPacket(name, false))
@@ -184,16 +204,17 @@ func (h *Handler) handleCreateNewCharacter(reader *packet.Reader) {
 	hair := reader.ReadInt()      // Hair ID (base)
 	hairColor := reader.ReadInt() // Hair color (added to hair)
 	skinColor := reader.ReadInt() // Skin color
-	_ = reader.ReadInt()          // Coat (top)
-	_ = reader.ReadInt()          // Pants (bottom)
-	_ = reader.ReadInt()          // Shoes
-	_ = reader.ReadInt()          // Weapon
+	coat := reader.ReadInt()      // Coat (top)
+	pants := reader.ReadInt()     // Pants (bottom)
+	shoes := reader.ReadInt()     // Shoes
+	weapon := reader.ReadInt()    // Weapon
 	gender := reader.ReadByte()   // Gender
 
 	// Hair = base hair + hair color
 	finalHair := hair + hairColor
 
-	log.Printf("Creating character: %s (face=%d, hair=%d, skin=%d)", name, face, finalHair, skinColor)
+	log.Printf("Creating character: %s (face=%d, hair=%d, skin=%d, coat=%d, pants=%d, shoes=%d, weapon=%d)", 
+		name, face, finalHair, skinColor, coat, pants, shoes, weapon)
 
 	char := &models.Character{
 		AccountID: h.accountID,
@@ -213,17 +234,51 @@ func (h *Handler) handleCreateNewCharacter(reader *packet.Reader) {
 		MaxHP:     50,
 		MP:        5,
 		MaxMP:     5,
-		MapID:     100000000, // Henesys
+		MapID:     10000, // Maple Island
 	}
 
-	if err := h.characters.Create(char); err != nil {
+	if err := h.characters.Create(ctx(), char); err != nil {
 		log.Printf("Failed to create character: %v", err)
 		h.conn.Write(CreateNewCharacterResultPacket(false, nil))
 		return
 	}
 
-	log.Printf("Character created: %s (id=%d)", name, char.ID)
-	if err := h.conn.Write(CreateNewCharacterResultPacket(true, char)); err != nil {
+	// Save initial equipment to inventory
+	// Equipment slots: -5 = top, -6 = bottom, -7 = shoes, -11 = weapon
+	initialEquips := []struct {
+		slot   int16
+		itemID int32
+	}{
+		{-5, int32(coat)},   // Top
+		{-6, int32(pants)},  // Bottom
+		{-7, int32(shoes)},  // Shoes
+		{-11, int32(weapon)}, // Weapon
+	}
+
+	for _, equip := range initialEquips {
+		if equip.itemID == 0 {
+			continue // Skip if no item selected
+		}
+		
+		slots := byte(7) // Default upgrade slots
+		item := &models.Inventory{
+			CharacterID: char.ID,
+			Type:        byte(models.InventoryEquipped),
+			Slot:        equip.slot,
+			ItemID:      equip.itemID,
+			Quantity:    1,
+			Slots:       &slots,
+		}
+		if err := h.inventories.Create(ctx(), item); err != nil {
+			log.Printf("Failed to save equipment item %d: %v", equip.itemID, err)
+		}
+	}
+
+	// Fetch equipped items to send with response
+	equippedItems, _ := h.inventories.FindByCharacterAndType(ctx(), char.ID, models.InventoryEquipped)
+
+	log.Printf("Character created: %s (id=%d) with %d equipped items", name, char.ID, len(equippedItems))
+	if err := h.conn.Write(CreateNewCharacterResultPacketWithEquips(true, char, equippedItems)); err != nil {
 		log.Printf("Failed to send character creation result: %v", err)
 	}
 }

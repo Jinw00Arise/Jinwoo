@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -9,6 +10,12 @@ import (
 	"github.com/Jinw00Arise/Jinwoo/internal/database/repository"
 	"github.com/Jinw00Arise/Jinwoo/internal/wz"
 )
+
+// ctx returns a background context for database operations
+// TODO: Propagate context from handler to inventory operations
+func ctx() context.Context {
+	return context.Background()
+}
 
 // InventorySlots defines the maximum slots per inventory type
 const (
@@ -63,7 +70,7 @@ func NewManager(characterID uint, repo *repository.InventoryRepository) *Manager
 
 // Load loads all inventory items from the database
 func (m *Manager) Load() error {
-	items, err := m.repo.FindByCharacterID(m.characterID)
+	items, err := m.repo.FindByCharacterID(ctx(), m.characterID)
 	if err != nil {
 		return fmt.Errorf("failed to load inventory: %w", err)
 	}
@@ -223,7 +230,7 @@ func (m *Manager) AddItem(itemID int32, quantity int16) ([]*InventoryOperation, 
 			Quantity:    1,
 		}
 		
-		if err := m.repo.Create(item); err != nil {
+		if err := m.repo.Create(ctx(), item); err != nil {
 			return nil, fmt.Errorf("failed to save item: %w", err)
 		}
 		
@@ -254,7 +261,7 @@ func (m *Manager) AddItem(itemID int32, quantity int16) ([]*InventoryOperation, 
 			existingItem.Quantity += toAdd
 			remaining -= toAdd
 			
-			if err := m.repo.Update(existingItem); err != nil {
+			if err := m.repo.Update(ctx(), existingItem); err != nil {
 				return nil, fmt.Errorf("failed to update stack: %w", err)
 			}
 			
@@ -293,7 +300,7 @@ func (m *Manager) AddItem(itemID int32, quantity int16) ([]*InventoryOperation, 
 			Quantity:    toAdd,
 		}
 		
-		if err := m.repo.Create(item); err != nil {
+		if err := m.repo.Create(ctx(), item); err != nil {
 			return nil, fmt.Errorf("failed to save item: %w", err)
 		}
 		
@@ -343,7 +350,7 @@ func (m *Manager) RemoveItem(itemID int32, quantity int16) ([]*InventoryOperatio
 			// Remove entire stack
 			remaining -= item.Quantity
 			
-			if err := m.repo.Delete(item); err != nil {
+			if err := m.repo.Delete(ctx(), item); err != nil {
 				return nil, fmt.Errorf("failed to delete item: %w", err)
 			}
 			
@@ -361,7 +368,7 @@ func (m *Manager) RemoveItem(itemID int32, quantity int16) ([]*InventoryOperatio
 			item.Quantity -= remaining
 			remaining = 0
 			
-			if err := m.repo.Update(item); err != nil {
+			if err := m.repo.Update(ctx(), item); err != nil {
 				return nil, fmt.Errorf("failed to update item: %w", err)
 			}
 			
@@ -529,7 +536,7 @@ func (m *Manager) UseItem(invType models.InventoryType, slot int16) (*InventoryO
 	
 	if item.Quantity <= 0 {
 		// Remove item completely
-		if err := m.repo.Delete(item); err != nil {
+		if err := m.repo.Delete(ctx(), item); err != nil {
 			return nil, fmt.Errorf("failed to delete item: %w", err)
 		}
 		m.removeFromCache(item)
@@ -544,7 +551,7 @@ func (m *Manager) UseItem(invType models.InventoryType, slot int16) (*InventoryO
 	}
 	
 	// Update quantity
-	if err := m.repo.Update(item); err != nil {
+	if err := m.repo.Update(ctx(), item); err != nil {
 		return nil, fmt.Errorf("failed to update item: %w", err)
 	}
 	
@@ -587,7 +594,7 @@ func (m *Manager) MoveItem(invType models.InventoryType, srcSlot, destSlot int16
 		
 		if srcItem.Quantity <= 0 {
 			// Remove entire item
-			if err := m.repo.Delete(srcItem); err != nil {
+			if err := m.repo.Delete(ctx(), srcItem); err != nil {
 				return nil, fmt.Errorf("failed to delete item: %w", err)
 			}
 			m.removeFromCache(srcItem)
@@ -601,7 +608,7 @@ func (m *Manager) MoveItem(invType models.InventoryType, srcSlot, destSlot int16
 			log.Printf("[Inventory] Dropped %d x item %d from slot %d", toRemove, srcItem.ItemID, srcSlot)
 		} else {
 			// Update quantity
-			if err := m.repo.Update(srcItem); err != nil {
+			if err := m.repo.Update(ctx(), srcItem); err != nil {
 				return nil, fmt.Errorf("failed to update item: %w", err)
 			}
 			
@@ -628,7 +635,7 @@ func (m *Manager) MoveItem(invType models.InventoryType, srcSlot, destSlot int16
 		srcItem.Slot = destSlot
 		invMap[destSlot] = srcItem
 		
-		if err := m.repo.Update(srcItem); err != nil {
+		if err := m.repo.Update(ctx(), srcItem); err != nil {
 			return nil, fmt.Errorf("failed to update item: %w", err)
 		}
 		
@@ -660,7 +667,7 @@ func (m *Manager) MoveItem(invType models.InventoryType, srcSlot, destSlot int16
 			destItem.Quantity += toMove
 			srcItem.Quantity -= toMove
 			
-			if err := m.repo.Update(destItem); err != nil {
+			if err := m.repo.Update(ctx(), destItem); err != nil {
 				return nil, fmt.Errorf("failed to update dest item: %w", err)
 			}
 			
@@ -673,7 +680,7 @@ func (m *Manager) MoveItem(invType models.InventoryType, srcSlot, destSlot int16
 			})
 			
 			if srcItem.Quantity <= 0 {
-				if err := m.repo.Delete(srcItem); err != nil {
+				if err := m.repo.Delete(ctx(), srcItem); err != nil {
 					return nil, fmt.Errorf("failed to delete src item: %w", err)
 				}
 				m.removeFromCache(srcItem)
@@ -684,7 +691,7 @@ func (m *Manager) MoveItem(invType models.InventoryType, srcSlot, destSlot int16
 					Slot:    srcSlot,
 				})
 			} else {
-				if err := m.repo.Update(srcItem); err != nil {
+				if err := m.repo.Update(ctx(), srcItem); err != nil {
 					return nil, fmt.Errorf("failed to update src item: %w", err)
 				}
 				
@@ -712,10 +719,10 @@ func (m *Manager) MoveItem(invType models.InventoryType, srcSlot, destSlot int16
 	invMap[destSlot] = srcItem
 	invMap[srcSlot] = destItem
 	
-	if err := m.repo.Update(srcItem); err != nil {
+	if err := m.repo.Update(ctx(), srcItem); err != nil {
 		return nil, fmt.Errorf("failed to update src item: %w", err)
 	}
-	if err := m.repo.Update(destItem); err != nil {
+	if err := m.repo.Update(ctx(), destItem); err != nil {
 		return nil, fmt.Errorf("failed to update dest item: %w", err)
 	}
 	

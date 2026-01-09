@@ -675,6 +675,7 @@ const (
 	StatEXP        uint32 = 0x10000
 	StatPOP        uint32 = 0x20000  // Fame
 	StatMoney      uint32 = 0x40000  // Meso
+	StatMeso       uint32 = 0x40000  // Alias for StatMoney
 	StatPet        uint32 = 0x180008 // Pet-related
 )
 
@@ -778,30 +779,39 @@ const (
 )
 
 // DropEnterFieldPacket creates a packet to spawn a drop on the ground
-func DropEnterFieldPacket(drop *stage.Drop, startX, startY int16, enterType byte) packet.Packet {
+func DropEnterFieldPacket(drop *stage.Drop, enterType byte, startX, startY int16, delay int16) packet.Packet {
 	p := packet.NewWithOpcode(maple.SendDropEnterField)
 	
 	p.WriteByte(enterType)            // nEnterType
 	p.WriteInt(drop.ObjectID)         // DROP->dwId
-	p.WriteByte(0)                    // DROP->bIsMoney (0 = item, 1 = meso)
-	p.WriteInt(uint32(drop.ItemID))   // DROP->nInfo (itemId or meso amount)
+	
+	if drop.IsMeso {
+		p.WriteByte(1)                    // DROP->bIsMoney (1 = meso)
+		p.WriteInt(uint32(drop.Meso))     // DROP->nInfo (meso amount)
+	} else {
+		p.WriteByte(0)                    // DROP->bIsMoney (0 = item)
+		p.WriteInt(uint32(drop.ItemID))   // DROP->nInfo (itemId)
+	}
+	
 	p.WriteInt(uint32(drop.OwnerID))  // DROP->dwOwnerID
 	p.WriteByte(2)                    // DROP->nOwnType (0=none, 1=party, 2=owner, 3=explosive)
 	p.WriteShort(uint16(drop.X))      // drop position x
 	p.WriteShort(uint16(drop.Y))      // drop position y
-	p.WriteInt(0)                     // DROP->dwSourceID (0 for player drop)
+	p.WriteInt(0)                     // DROP->dwSourceID (0 for player/mob drop)
 	
 	// For types other than ON_THE_FOOTHOLD (2), need source position and delay
 	if enterType != DropEnterOnFoothold {
 		p.WriteShort(uint16(startX))  // source x
 		p.WriteShort(uint16(startY))  // source y
-		p.WriteShort(0)               // tDelay
+		p.WriteShort(uint16(delay))   // tDelay
 	}
 	
 	// For items (not meso), write expiration time
-	writeFileTime(&p, time.Time{})    // m_dateExpire
+	if !drop.IsMeso {
+		writeFileTime(&p, time.Time{})    // m_dateExpire
+	}
 	
-	p.WriteByte(0)                    // bByPet (false for user drops)
+	p.WriteByte(0)                    // bByPet (false for user/mob drops)
 	p.WriteByte(0)                    // extra bool (IWzGr2DLayer::Putz)
 	
 	return p
@@ -838,5 +848,180 @@ func MessagePickUpItemPacket(itemID int32, quantity int32) packet.Packet {
 	p.WriteInt(uint32(itemID))        // nItemID
 	p.WriteInt(uint32(quantity))      // quantity
 	
+	return p
+}
+
+// MessagePickUpMesoPacket creates a packet to show meso pickup notification
+func MessagePickUpMesoPacket(mesoAmount int32) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMessage)
+	
+	// Message type for drop pickup
+	p.WriteByte(0)                    // DropPickUp message type
+	p.WriteByte(1)                    // MONEY (meso)
+	p.WriteByte(0)                    // bPortionNotFound (portion not found flag)
+	p.WriteInt(uint32(mesoAmount))    // meso amount
+	p.WriteShort(0)                   // Internet Cafe Meso Bonus
+	
+	return p
+}
+
+// ============================================================================
+// Mob Packets
+// ============================================================================
+
+// MobEnterFieldPacket creates a packet to spawn a mob
+func MobEnterFieldPacket(mob *stage.Mob) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMobEnterField)
+	
+	p.WriteInt(mob.ObjectID)                  // dwMobID
+	p.WriteByte(1)                            // nCalcDamageIndex (1 = normal)
+	p.WriteInt(uint32(mob.TemplateID))        // dwTemplateID
+	
+	// CMob::SetTemporaryStat (MobStat.encodeTemporary)
+	encodeMobTemporaryStat(&p)
+	
+	// CMob::encode (mob position data)
+	encodeMob(&p, mob)
+	
+	return p
+}
+
+// MobLeaveFieldPacket creates a packet to remove a mob
+func MobLeaveFieldPacket(objectID uint32, leaveType byte) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMobLeaveField)
+	
+	p.WriteInt(objectID)                      // dwObjectID
+	p.WriteByte(leaveType)                    // nLeaveType (0=disappear, 1=death, etc.)
+	
+	return p
+}
+
+// Mob leave types
+const (
+	MobLeaveDisappear  byte = 0 // Just disappear
+	MobLeaveDie        byte = 1 // Death animation
+	MobLeaveFadeOut    byte = 2 // Fade out
+	MobLeaveExplode    byte = 3 // Explode
+	MobLeaveSwallow    byte = 4 // Swallowed
+)
+
+// MobChangeControllerPacket creates a packet to assign mob control to a player
+func MobChangeControllerPacket(forController bool, mob *stage.Mob) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMobChangeController)
+	
+	p.WriteBool(forController)                // forController (true = this client controls the mob)
+	p.WriteInt(mob.ObjectID)                  // dwMobID
+	
+	if forController {
+		p.WriteByte(1)                        // nCalcDamageIndex (1 = normal)
+		p.WriteInt(uint32(mob.TemplateID))    // dwTemplateID
+		
+		// CMob::SetTemporaryStat (MobStat.encodeTemporary)
+		encodeMobTemporaryStat(&p)
+		
+		// CMob::encode (mob position data)
+		encodeMob(&p, mob)
+	}
+	
+	return p
+}
+
+// MobCtrlAckPacket creates an acknowledgment packet for mob control
+func MobCtrlAckPacket(objectID uint32, moveID int16, nextAttackPossible bool, mp int16, skillID, skillLevel byte) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMobCtrlAck)
+	
+	p.WriteInt(objectID)                      // dwMobID
+	p.WriteShort(uint16(moveID))              // nMobCtrlSN
+	p.WriteBool(nextAttackPossible)           // bNextAttackPossible
+	p.WriteShort(uint16(mp))                  // nMP
+	p.WriteByte(skillID)                      // nSkillCommand (skill ID)
+	p.WriteByte(skillLevel)                   // nSLV (skill level)
+	
+	return p
+}
+
+// MobHPIndicatorPacket shows the HP bar for a mob (boss HP bar or regular)
+func MobHPIndicatorPacket(objectID uint32, hpPercent byte) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMobHPIndicator)
+	
+	p.WriteInt(objectID)                      // dwObjectID
+	p.WriteByte(hpPercent)                    // nHPpercentage (0-100)
+	
+	return p
+}
+
+// MobMovePacket creates a packet for mob movement (broadcast to others)
+// This must match Java's MobPacket.mobMove format
+func MobMovePacket(objectID uint32, actionMask, actionAndDir byte, targetInfo int32, 
+	multiTargetForBall [][2]int32, randTimeForAreaAttack []int32, movePathData []byte) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendMobMove)
+	
+	p.WriteInt(objectID)                      // dwMobID
+	p.WriteByte(0)                            // bNotForceLandingWhenDiscard
+	p.WriteByte(0)                            // bNotChangeAction
+	p.WriteByte(actionMask)                   // mai.actionMask
+	p.WriteByte(actionAndDir)                 // mai.actionAndDir
+	p.WriteInt(uint32(targetInfo))            // mai.targetInfo
+	
+	// aMultiTargetForBall
+	p.WriteInt(uint32(len(multiTargetForBall)))
+	for _, target := range multiTargetForBall {
+		p.WriteInt(uint32(target[0])) // x
+		p.WriteInt(uint32(target[1])) // y
+	}
+	
+	// aRandTimeforAreaAttack
+	p.WriteInt(uint32(len(randTimeForAreaAttack)))
+	for _, value := range randTimeForAreaAttack {
+		p.WriteInt(uint32(value))
+	}
+	
+	// CMovePath::OnMovePacket - forward the raw move path data
+	for _, b := range movePathData {
+		p.WriteByte(b)
+	}
+	
+	return p
+}
+
+// encodeMobTemporaryStat writes empty temporary stat data
+func encodeMobTemporaryStat(p *packet.Packet) {
+	// MobStat::encodeTemporary - 128-bit flag (4 ints), all zeros = no buffs/debuffs
+	p.WriteInt(0)
+	p.WriteInt(0)
+	p.WriteInt(0)
+	p.WriteInt(0)
+	// If flags were set, would encode individual stat values here
+}
+
+// encodeMob writes mob position/state data (CMob::encode)
+func encodeMob(p *packet.Packet, mob *stage.Mob) {
+	p.WriteShort(uint16(mob.X))               // ptPosPrev.x
+	p.WriteShort(uint16(mob.Y))               // ptPosPrev.y
+	p.WriteByte(mob.GetMoveAction())          // nMoveAction (stance + direction)
+	p.WriteShort(mob.FH)                      // pvcMobActiveObj (current foothold)
+	p.WriteShort(mob.FH)                      // startFoothold (original foothold)
+	p.WriteByte(0xFE)                         // nAppearType/summonType (-2 = normal spawn, no effect)
+	// If summonType == REVIVED or >= 0, would write dwOption (int) here
+	// For -2 (0xFE), we skip dwOption
+	p.WriteByte(0)                            // nTeamForMCarnival
+	p.WriteInt(0)                             // nEffectItemID
+	p.WriteInt(0)                             // nPhase
+}
+
+// Notice types for ServerNoticePacket
+const (
+	NoticeTypePopup    byte = 0 // Popup notice
+	NoticeTypeBlue     byte = 1 // Blue text notice
+	NoticeTypeWhite    byte = 2 // White text notice in chat
+	NoticeTypePink     byte = 5 // Pink text notice
+	NoticeTypeLightBlue byte = 6 // Light blue text notice
+)
+
+// ServerNoticePacket creates a broadcast message packet
+func ServerNoticePacket(noticeType byte, message string) packet.Packet {
+	p := packet.NewWithOpcode(maple.SendBroadcastMsg)
+	p.WriteByte(noticeType)
+	p.WriteString(message)
 	return p
 }

@@ -109,3 +109,17 @@ func (sm *StageManager) CleanupEmpty() int {
 	return removed
 }
 
+// Tick runs periodic updates on all stages (mob respawns, etc.)
+func (sm *StageManager) Tick() {
+	sm.mu.RLock()
+	stages := make([]*Stage, 0, len(sm.stages))
+	for _, s := range sm.stages {
+		stages = append(stages, s)
+	}
+	sm.mu.RUnlock()
+	
+	for _, s := range stages {
+		s.Tick()
+	}
+}
+

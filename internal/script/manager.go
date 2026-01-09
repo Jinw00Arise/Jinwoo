@@ -51,6 +51,11 @@ func GetInstance() *Manager {
 	return instance
 }
 
+// GetManager is an alias for GetInstance
+func GetManager() *Manager {
+	return instance
+}
+
 // loadAllScripts loads all scripts from the scripts directory
 func (m *Manager) loadAllScripts() error {
 	scriptTypes := []ScriptType{ScriptTypeNPC, ScriptTypePortal, ScriptTypeQuest, ScriptTypeEvent, ScriptTypeMap}

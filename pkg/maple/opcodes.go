@@ -43,10 +43,10 @@ const (
 	// RecvCreateNewCharacterEx    uint16 = 38
 
 	// User opcodes
-	RecvUserTransferFieldRequest   uint16 = 41
+	RecvUserTransferFieldRequest       uint16 = 41
 	// RecvUserTransferChannelRequest uint16 = 42
-	// RecvUserMigrateToCashShopRequest uint16 = 43
-	RecvUserMove                   uint16 = 44
+	RecvUserMigrateToCashShopRequest   uint16 = 43
+	RecvUserMove                       uint16 = 44
 	// RecvUserSitRequest          uint16 = 45
 	// RecvUserPortableChairSitRequest uint16 = 46
 	RecvUserMeleeAttack            uint16 = 47
@@ -230,7 +230,7 @@ const (
 
 	// Mob opcodes
 	RecvMobMove                    uint16 = 227
-	// RecvMobApplyCtrl            uint16 = 228
+	RecvMobApplyCtrl               uint16 = 228
 	// RecvMobDropPickUpRequest    uint16 = 229
 	// RecvMobHitByObstacle        uint16 = 230
 	// RecvMobHitByMob             uint16 = 231
@@ -811,6 +811,7 @@ var recvOpcodeNames = map[uint16]string{
 	RecvUpdateScreenSetting:        "UpdateScreenSetting",
 	// Mob
 	RecvMobMove:                    "MobMove",
+	RecvMobApplyCtrl:               "MobApplyCtrl",
 	// NPC
 	RecvNpcMove:                    "NpcMove",
 	// Drop
@@ -847,7 +848,10 @@ var sendOpcodeNames = map[uint16]string{
 	SendScriptMessage:            "ScriptMessage",
 	SendMobEnterField:            "MobEnterField",
 	SendMobLeaveField:            "MobLeaveField",
+	SendMobChangeController:      "MobChangeController",
 	SendMobMove:                  "MobMove",
+	SendMobCtrlAck:               "MobCtrlAck",
+	SendMobHPIndicator:           "MobHPIndicator",
 	SendNpcEnterField:            "NpcEnterField",
 	SendNpcLeaveField:            "NpcLeaveField",
 	SendNpcChangeController:      "NpcChangeController",

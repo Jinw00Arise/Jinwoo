@@ -5,10 +5,17 @@ import (
 	"io"
 	"log"
 	"net"
+	"time"
 
 	"github.com/Jinw00Arise/Jinwoo/internal/crypto"
 	"github.com/Jinw00Arise/Jinwoo/internal/packet"
 	"github.com/Jinw00Arise/Jinwoo/pkg/maple"
+)
+
+// Network timeouts
+const (
+	ReadTimeout  = 5 * time.Minute  // Disconnect if no packet received for this duration
+	WriteTimeout = 30 * time.Second // Timeout for write operations
 )
 
 var debugPackets bool
@@ -89,6 +96,11 @@ func (c *Connection) Write(p packet.Packet) error {
 	header := EncodeHeader(len(data), c.sendIV)
 	crypto.ShuffleIV(c.sendIV)
 
+	// Set write deadline
+	if err := c.conn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
+		return fmt.Errorf("set write deadline: %w", err)
+	}
+
 	if _, err := c.conn.Write(header); err != nil {
 		return fmt.Errorf("write header: %w", err)
 	}
@@ -99,7 +111,13 @@ func (c *Connection) Write(p packet.Packet) error {
 }
 
 // Read receives and decrypts a packet. Order: header -> read -> AES -> Shanda -> shuffle IV.
+// Sets a read deadline to detect idle connections.
 func (c *Connection) Read() (packet.Packet, error) {
+	// Set read deadline for idle timeout
+	if err := c.conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
+		return nil, fmt.Errorf("set read deadline: %w", err)
+	}
+
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(c.conn, header); err != nil {
 		return nil, err

@@ -95,3 +95,13 @@ func (r *Reader) ReadRemaining() []byte {
 	r.pos = len(r.data)
 	return data
 }
+
+// Position returns the current read position.
+func (r *Reader) Position() int {
+	return r.pos
+}
+
+// Data returns the underlying raw packet data.
+func (r *Reader) Data() []byte {
+	return r.data
+}

@@ -1,5 +1,6 @@
 module github.com/Jinw00Arise/Jinwoo
 
+// Note: Upgrade to go 1.21+ when available for slog support
 go 1.18
 
 require (

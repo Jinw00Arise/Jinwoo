@@ -1,0 +1,73 @@
+[
+  {
+    "mobId": 100100,
+    "mesoMin": 1,
+    "mesoMax": 5,
+    "mesoChance": 70,
+    "items": [{ "itemId": 4000019, "chance": 60, "minQty": 1, "maxQty": 1 }]
+  },
+  {
+    "mobId": 100101,
+    "mesoMin": 2,
+    "mesoMax": 8,
+    "mesoChance": 70,
+    "items": [{ "itemId": 4000000, "chance": 60, "minQty": 1, "maxQty": 1 }]
+  },
+  {
+    "mobId": 100102,
+    "mesoMin": 3,
+    "mesoMax": 10,
+    "mesoChance": 70,
+    "items": [{ "itemId": 4000016, "chance": 60, "minQty": 1, "maxQty": 1 }]
+  },
+  {
+    "mobId": 120100,
+    "mesoMin": 3,
+    "mesoMax": 12,
+    "mesoChance": 70,
+    "items": [{ "itemId": 4000015, "chance": 50, "minQty": 1, "maxQty": 1 }]
+  },
+  {
+    "mobId": 130100,
+    "mesoMin": 5,
+    "mesoMax": 15,
+    "mesoChance": 70,
+    "items": [{ "itemId": 4000022, "chance": 50, "minQty": 1, "maxQty": 1 }]
+  },
+  {
+    "mobId": 210100,
+    "mesoMin": 5,
+    "mesoMax": 20,
+    "mesoChance": 70,
+    "items": [{ "itemId": 4000004, "chance": 55, "minQty": 1, "maxQty": 1 }]
+  },
+  {
+    "mobId": 1210102,
+    "mesoMin": 10,
+    "mesoMax": 30,
+    "mesoChance": 70,
+    "items": [{ "itemId": 4000001, "chance": 50, "minQty": 1, "maxQty": 1 }]
+  },
+  {
+    "mobId": 1210100,
+    "mesoMin": 15,
+    "mesoMax": 40,
+    "mesoChance": 70,
+    "items": [{ "itemId": 4000006, "chance": 50, "minQty": 1, "maxQty": 1 }]
+  },
+  {
+    "mobId": 9300018,
+    "mesoMin": 15,
+    "mesoMax": 40,
+    "mesoChance": 70,
+    "items": [
+      {
+        "itemId": 4031802,
+        "chance": 99,
+        "minQty": 1,
+        "maxQty": 1,
+        "questId": 1018
+      }
+    ]
+  }
+]

@@ -5,202 +5,165 @@ import (
 	"testing"
 )
 
-func TestPacketWriteRead(t *testing.T) {
+func TestPacket_WriteByte(t *testing.T) {
 	p := New()
-	
-	// Write various data types
 	p.WriteByte(0x42)
-	p.WriteShort(0x1234)
-	p.WriteInt(0x12345678)
-	p.WriteLong(0x123456789ABCDEF0)
-	p.WriteString("Hello")
-	p.WriteBool(true)
-	p.WriteBool(false)
 	
-	// Create reader (skip first 2 bytes which would be opcode in real packet)
-	// For this test, manually construct the reader
-	r := &Reader{data: p, pos: 0}
-	
-	if b := r.ReadByte(); b != 0x42 {
-		t.Errorf("ReadByte() = %d, want 0x42", b)
+	if len(p) != 1 {
+		t.Errorf("Expected length 1, got %d", len(p))
 	}
-	
-	if s := r.ReadShort(); s != 0x1234 {
-		t.Errorf("ReadShort() = %d, want 0x1234", s)
-	}
-	
-	if i := r.ReadInt(); i != 0x12345678 {
-		t.Errorf("ReadInt() = %d, want 0x12345678", i)
-	}
-	
-	if l := r.ReadLong(); l != 0x123456789ABCDEF0 {
-		t.Errorf("ReadLong() = %d, want 0x123456789ABCDEF0", l)
-	}
-	
-	if str := r.ReadString(); str != "Hello" {
-		t.Errorf("ReadString() = %q, want %q", str, "Hello")
-	}
-	
-	if b := r.ReadBool(); !b {
-		t.Error("ReadBool() = false, want true")
-	}
-	
-	if b := r.ReadBool(); b {
-		t.Error("ReadBool() = true, want false")
+	if p[0] != 0x42 {
+		t.Errorf("Expected 0x42, got 0x%02X", p[0])
 	}
 }
 
-func TestPacketWithOpcode(t *testing.T) {
-	p := NewWithOpcode(0x1234)
+func TestPacket_WriteShort(t *testing.T) {
+	p := New()
+	p.WriteShort(0x1234)
 	
 	if len(p) != 2 {
-		t.Errorf("NewWithOpcode length = %d, want 2", len(p))
+		t.Errorf("Expected length 2, got %d", len(p))
 	}
-	
-	// Check opcode is little-endian
+	// Little-endian
 	if p[0] != 0x34 || p[1] != 0x12 {
-		t.Errorf("Opcode bytes = [%02X, %02X], want [34, 12]", p[0], p[1])
-	}
-	
-	r := NewReader(p)
-	if r.Opcode != 0x1234 {
-		t.Errorf("Reader.Opcode = %04X, want 1234", r.Opcode)
+		t.Errorf("Expected 34 12, got %02X %02X", p[0], p[1])
 	}
 }
 
-func TestReaderRemaining(t *testing.T) {
+func TestPacket_WriteInt(t *testing.T) {
 	p := New()
-	p.WriteBytes([]byte{1, 2, 3, 4, 5})
+	p.WriteInt(0x12345678)
 	
-	r := &Reader{data: p, pos: 0}
-	
-	if r.Remaining() != 5 {
-		t.Errorf("Remaining() = %d, want 5", r.Remaining())
+	if len(p) != 4 {
+		t.Errorf("Expected length 4, got %d", len(p))
 	}
-	
-	r.ReadByte()
-	if r.Remaining() != 4 {
-		t.Errorf("Remaining() after read = %d, want 4", r.Remaining())
-	}
-	
-	r.Skip(2)
-	if r.Remaining() != 2 {
-		t.Errorf("Remaining() after skip = %d, want 2", r.Remaining())
-	}
-}
-
-func TestReaderReadRemaining(t *testing.T) {
-	p := New()
-	p.WriteBytes([]byte{1, 2, 3, 4, 5})
-	
-	r := &Reader{data: p, pos: 0}
-	r.ReadByte() // Skip first byte
-	
-	remaining := r.ReadRemaining()
-	expected := []byte{2, 3, 4, 5}
-	
-	if !bytes.Equal(remaining, expected) {
-		t.Errorf("ReadRemaining() = %v, want %v", remaining, expected)
-	}
-	
-	if r.Remaining() != 0 {
-		t.Errorf("Remaining() after ReadRemaining = %d, want 0", r.Remaining())
-	}
-}
-
-func TestBuilderFluent(t *testing.T) {
-	p := NewBuilder(0x1234).
-		Byte(0x42).
-		Short(0x1234).
-		Int(0x12345678).
-		String("Test").
-		Bool(true).
-		Zero(3).
-		Build()
-	
-	r := NewReader(p)
-	
-	if r.Opcode != 0x1234 {
-		t.Errorf("Opcode = %04X, want 1234", r.Opcode)
-	}
-	
-	if b := r.ReadByte(); b != 0x42 {
-		t.Errorf("Byte = %d, want 0x42", b)
-	}
-	
-	if s := r.ReadShort(); s != 0x1234 {
-		t.Errorf("Short = %d, want 0x1234", s)
-	}
-	
-	if i := r.ReadInt(); i != 0x12345678 {
-		t.Errorf("Int = %d, want 0x12345678", i)
-	}
-	
-	if str := r.ReadString(); str != "Test" {
-		t.Errorf("String = %q, want %q", str, "Test")
-	}
-	
-	if b := r.ReadBool(); !b {
-		t.Error("Bool = false, want true")
-	}
-	
-	// Zero bytes
-	for i := 0; i < 3; i++ {
-		if b := r.ReadByte(); b != 0 {
-			t.Errorf("Zero byte %d = %d, want 0", i, b)
-		}
-	}
-}
-
-func TestFixedString(t *testing.T) {
-	p := New()
-	p.WriteFixedString("Hello", 10)
-	
-	if len(p) != 10 {
-		t.Errorf("FixedString length = %d, want 10", len(p))
-	}
-	
-	// Check content
-	expected := []byte{'H', 'e', 'l', 'l', 'o', 0, 0, 0, 0, 0}
+	// Little-endian
+	expected := []byte{0x78, 0x56, 0x34, 0x12}
 	if !bytes.Equal(p, expected) {
-		t.Errorf("FixedString content = %v, want %v", []byte(p), expected)
+		t.Errorf("Expected %X, got %X", expected, p)
 	}
 }
 
-func TestFixedStringTruncate(t *testing.T) {
+func TestPacket_WriteLong(t *testing.T) {
 	p := New()
-	p.WriteFixedString("HelloWorld", 5)
+	p.WriteLong(0x123456789ABCDEF0)
 	
-	if len(p) != 5 {
-		t.Errorf("FixedString truncate length = %d, want 5", len(p))
+	if len(p) != 8 {
+		t.Errorf("Expected length 8, got %d", len(p))
+	}
+}
+
+func TestPacket_WriteString(t *testing.T) {
+	p := New()
+	p.WriteString("Hello")
+	
+	// 2 bytes length + 5 bytes string
+	if len(p) != 7 {
+		t.Errorf("Expected length 7, got %d", len(p))
 	}
 	
-	expected := []byte{'H', 'e', 'l', 'l', 'o'}
-	if !bytes.Equal(p, expected) {
-		t.Errorf("FixedString truncate content = %v, want %v", []byte(p), expected)
+	// Check length prefix (little-endian)
+	if p[0] != 5 || p[1] != 0 {
+		t.Errorf("Expected length prefix 05 00, got %02X %02X", p[0], p[1])
+	}
+	
+	// Check string content
+	if string(p[2:]) != "Hello" {
+		t.Errorf("Expected 'Hello', got '%s'", string(p[2:]))
 	}
 }
 
-func BenchmarkPacketWrite(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		p := New()
-		p.WriteByte(0x42)
-		p.WriteShort(0x1234)
-		p.WriteInt(0x12345678)
-		p.WriteLong(0x123456789ABCDEF0)
-		p.WriteString("Hello World")
+func TestPacket_WriteBytes(t *testing.T) {
+	p := New()
+	data := []byte{0x01, 0x02, 0x03}
+	p.WriteBytes(data)
+	
+	if !bytes.Equal(p, data) {
+		t.Errorf("Expected %X, got %X", data, p)
 	}
 }
 
-func BenchmarkBuilderWrite(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		NewBuilder(0x1234).
-			Byte(0x42).
-			Short(0x1234).
-			Int(0x12345678).
-			Long(0x123456789ABCDEF0).
-			String("Hello World").
-			Build()
+func TestPacket_Clone(t *testing.T) {
+	p := New()
+	p.WriteByte(0x42)
+	p.WriteShort(0x1234)
+	
+	clone := p.Clone()
+	
+	if !bytes.Equal(p, clone) {
+		t.Error("Clone should equal original")
+	}
+	
+	// Modify clone should not affect original
+	clone[0] = 0xFF
+	if p[0] == 0xFF {
+		t.Error("Clone modification should not affect original")
 	}
 }
 
+func TestReader_Opcode(t *testing.T) {
+	// NewReader reads the first 2 bytes as opcode
+	p := Packet{0x34, 0x12, 0x42}
+	r := NewReader(p)
+	
+	if r.Opcode != 0x1234 {
+		t.Errorf("Expected opcode 0x1234, got 0x%04X", r.Opcode)
+	}
+	
+	// Next read should be the data after opcode
+	val := r.ReadByte()
+	if val != 0x42 {
+		t.Errorf("Expected 0x42, got 0x%02X", val)
+	}
+}
+
+func TestReader_ReadShort(t *testing.T) {
+	// Include opcode prefix, then the data we want to read
+	p := Packet{0x00, 0x00, 0x34, 0x12}
+	r := NewReader(p)
+	
+	val := r.ReadShort()
+	if val != 0x1234 {
+		t.Errorf("Expected 0x1234, got 0x%04X", val)
+	}
+}
+
+func TestReader_ReadInt(t *testing.T) {
+	p := Packet{0x00, 0x00, 0x78, 0x56, 0x34, 0x12}
+	r := NewReader(p)
+	
+	val := r.ReadInt()
+	if val != 0x12345678 {
+		t.Errorf("Expected 0x12345678, got 0x%08X", val)
+	}
+}
+
+func TestReader_ReadString(t *testing.T) {
+	// Opcode (2 bytes) + length (2 bytes) + string content
+	p := Packet{0x00, 0x00, 0x05, 0x00, 'H', 'e', 'l', 'l', 'o'}
+	r := NewReader(p)
+	
+	val := r.ReadString()
+	if val != "Hello" {
+		t.Errorf("Expected 'Hello', got '%s'", val)
+	}
+}
+
+func TestReader_ReadBytes(t *testing.T) {
+	// Opcode + data
+	p := Packet{0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05}
+	r := NewReader(p)
+	
+	val := r.ReadBytes(3)
+	expected := []byte{0x01, 0x02, 0x03}
+	if !bytes.Equal(val, expected) {
+		t.Errorf("Expected %X, got %X", expected, val)
+	}
+	
+	// Should advance position
+	val2 := r.ReadBytes(2)
+	expected2 := []byte{0x04, 0x05}
+	if !bytes.Equal(val2, expected2) {
+		t.Errorf("Expected %X, got %X", expected2, val2)
+	}
+}

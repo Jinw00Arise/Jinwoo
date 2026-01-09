@@ -48,6 +48,7 @@ func Init(wzPath string) error {
 		instance.loadStrings()
 		instance.loadQuests()
 		instance.LoadAllItemStrings()
+		instance.LoadAllMobStrings()
 	})
 	return initErr
 }
@@ -55,6 +56,27 @@ func Init(wzPath string) error {
 // GetInstance returns the global DataManager instance
 func GetInstance() *DataManager {
 	return instance
+}
+
+// Reload reloads all WZ data from disk
+func (dm *DataManager) Reload() error {
+	// Clear all caches
+	dm.mapsMu.Lock()
+	dm.maps = make(map[int]*MapData)
+	dm.mapsMu.Unlock()
+	
+	dm.mu.Lock()
+	dm.items = make(map[int32]*ItemData)
+	dm.mu.Unlock()
+	
+	// Reload all data
+	dm.loadStrings()
+	dm.loadQuests()
+	dm.LoadAllItemStrings()
+	dm.LoadAllMobStrings()
+	
+	log.Println("[WZ] Data reloaded")
+	return nil
 }
 
 // loadStrings loads all string data (NPC names, mob names, map names)

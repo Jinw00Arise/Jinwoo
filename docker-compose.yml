@@ -1,0 +1,80 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: jinwoo-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jinwoo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jinwoo}
+      POSTGRES_DB: ${POSTGRES_DB:-jinwoo}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jinwoo}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - jinwoo-network
+
+  login:
+    build:
+      context: .
+      target: login
+    container_name: jinwoo-login
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-jinwoo}:${POSTGRES_PASSWORD:-jinwoo}@postgres:5432/${POSTGRES_DB:-jinwoo}?sslmode=disable
+      LOGIN_HOST: ${LOGIN_HOST:-0.0.0.0}
+      LOGIN_PORT: ${LOGIN_PORT:-8484}
+      AUTO_REGISTER: ${AUTO_REGISTER:-1}
+      DEBUG_PACKETS: ${DEBUG_PACKETS:-0}
+    ports:
+      - "${LOGIN_PORT:-8484}:8484"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - jinwoo-network
+
+  channel:
+    build:
+      context: .
+      target: channel
+    container_name: jinwoo-channel
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-jinwoo}:${POSTGRES_PASSWORD:-jinwoo}@postgres:5432/${POSTGRES_DB:-jinwoo}?sslmode=disable
+      CHANNEL_HOST: ${CHANNEL_HOST:-0.0.0.0}
+      CHANNEL_PORT: ${CHANNEL_PORT:-8585}
+      WZ_PATH: /app/data/wz
+      SCRIPTS_PATH: /app/scripts
+      EXP_RATE: ${EXP_RATE:-1}
+      QUEST_EXP_RATE: ${QUEST_EXP_RATE:-1}
+      DEBUG_PACKETS: ${DEBUG_PACKETS:-0}
+    ports:
+      - "${CHANNEL_PORT:-8585}:8585"
+    volumes:
+      - ./data/wz:/app/data/wz:ro
+      - ./scripts:/app/scripts:ro
+      - ./data/drop_tables.json:/app/data/drop_tables.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      login:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - jinwoo-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  jinwoo-network:
+    driver: bridge
+

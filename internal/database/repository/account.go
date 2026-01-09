@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 
 	"golang.org/x/crypto/bcrypt"
@@ -21,9 +22,9 @@ func NewAccountRepository(db *gorm.DB) *AccountRepository {
 	return &AccountRepository{db: db}
 }
 
-func (r *AccountRepository) FindByUsername(username string) (*models.Account, error) {
+func (r *AccountRepository) FindByUsername(ctx context.Context, username string) (*models.Account, error) {
 	var account models.Account
-	if err := r.db.Where("username = ?", username).First(&account).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("username = ?", username).First(&account).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrAccountNotFound
 		}
@@ -32,7 +33,7 @@ func (r *AccountRepository) FindByUsername(username string) (*models.Account, er
 	return &account, nil
 }
 
-func (r *AccountRepository) Create(username, password string) (*models.Account, error) {
+func (r *AccountRepository) Create(ctx context.Context, username, password string) (*models.Account, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
 		return nil, err
@@ -42,7 +43,7 @@ func (r *AccountRepository) Create(username, password string) (*models.Account, 
 		Username:     username,
 		PasswordHash: string(hash),
 	}
-	if err := r.db.Create(account).Error; err != nil {
+	if err := r.db.WithContext(ctx).Create(account).Error; err != nil {
 		return nil, err
 	}
 	return account, nil
