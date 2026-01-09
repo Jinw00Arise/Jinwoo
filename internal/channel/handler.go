@@ -75,7 +75,7 @@ func (h *Handler) OnDisconnect() {
 				mob.SetController(newController)
 				if newController > 0 {
 					if newUser := currentStage.Users().Get(newController); newUser != nil {
-						newUser.Connection().Write(MobChangeControllerPacket(true, mob))
+						_ = newUser.Connection().Write(MobChangeControllerPacket(true, mob)) // Ignore send errors
 					}
 				}
 			}

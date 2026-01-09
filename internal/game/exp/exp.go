@@ -225,7 +225,7 @@ func GetTotalExpForLevel(level int) int64 {
 	}
 	var total int64
 	for i := 1; i < level && i < len(ExpTable); i++ {
-		total += int64(ExpTable[i])
+		total += ExpTable[i]
 	}
 	return total
 }

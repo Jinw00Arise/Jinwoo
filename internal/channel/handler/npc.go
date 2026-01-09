@@ -38,7 +38,7 @@ func (h *NPCSelectHandler) Handle(s game.Session, reader *packet.Reader) {
 		return
 	}
 
-	objectID := uint32(reader.ReadInt())
+	objectID := reader.ReadInt()
 	x := reader.ReadShort()
 	y := reader.ReadShort()
 

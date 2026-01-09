@@ -181,7 +181,7 @@ func (h *Handler) handleDropPickUpRequest(reader *packet.Reader) {
 	}
 
 	// Remove drop from field (broadcast to all users on stage)
-	currentStage.Broadcast(DropLeaveFieldPacket(uint32(objectID), DropLeavePickUp, char.ID, 0))
+	currentStage.Broadcast(DropLeaveFieldPacket(objectID, DropLeavePickUp, char.ID, 0))
 
 	// Enable actions so player can continue playing
 	h.conn.Write(EnableActionsPacket())

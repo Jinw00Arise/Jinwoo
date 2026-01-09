@@ -251,7 +251,7 @@ func (s *Stage) tickMobRespawns() {
 		if controllerID > 0 {
 			controlPacket := s.buildMobControlPacket(true, mob)
 			if user := s.users.Get(controllerID); user != nil {
-				user.Connection().Write(controlPacket)
+				_ = user.Connection().Write(controlPacket) // Ignore send errors
 			}
 		}
 		

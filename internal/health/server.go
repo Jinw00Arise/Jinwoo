@@ -72,19 +72,19 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"uptime": time.Since(s.startTime).String(),
 	}
 
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response) // Ignore encode errors
 }
 
 // handleReady returns readiness status for Kubernetes/Docker
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if atomic.LoadInt32(&s.ready) == 0 {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("not ready"))
+		_, _ = w.Write([]byte("not ready")) // Ignore write errors
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("ready"))
+	_, _ = w.Write([]byte("ready")) // Ignore write errors
 }
 
 // handleMetrics returns Prometheus-compatible metrics
@@ -117,6 +117,6 @@ jinwoo_active_stages %d
 # TYPE jinwoo_uptime_seconds counter
 jinwoo_uptime_seconds %.0f
 `
-	w.Write([]byte(fmt.Sprintf(metrics, players, stages, uptime)))
+	_, _ = w.Write([]byte(fmt.Sprintf(metrics, players, stages, uptime))) // Ignore write errors
 }
 

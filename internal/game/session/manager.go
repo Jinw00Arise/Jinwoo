@@ -76,7 +76,7 @@ func (m *Manager) Broadcast(p packet.Packet) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, s := range m.sessions {
-		s.Send(p)
+		_ = s.Send(p) // Ignore send errors in broadcast
 	}
 }
 

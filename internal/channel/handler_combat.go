@@ -250,7 +250,7 @@ func (h *Handler) broadcastDropEnter(currentStage *stage.Stage, drop *stage.Drop
 			if questRecord != nil && questRecord.State == stage.QuestStatePerform {
 				// User has this quest active, send the drop
 				if conn := user.Connection(); conn != nil {
-					conn.Write(dropPacket)
+					_ = conn.Write(dropPacket) // Ignore send errors
 				}
 			}
 		}

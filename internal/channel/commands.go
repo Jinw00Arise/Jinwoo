@@ -206,8 +206,8 @@ func (c *CommandHandler) cmdItem(user *stage.User, args []string) string {
 
 	if len(args) >= 2 {
 		var qty int
-		_, err := fmt.Sscanf(args[1], "%d", &qty)
-		if err == nil && qty > 0 {
+		_, err2 := fmt.Sscanf(args[1], "%d", &qty)
+		if err2 == nil && qty > 0 {
 			quantity = int16(qty)
 		}
 	}
@@ -224,7 +224,7 @@ func (c *CommandHandler) cmdItem(user *stage.User, args []string) string {
 
 	// Send inventory update to client
 	if len(ops) > 0 {
-		user.Write(inventory.InventoryOperationPacket(ops, true))
+		_ = user.Write(inventory.InventoryOperationPacket(ops, true)) // Ignore send errors
 	}
 
 	// Get item name

@@ -315,7 +315,7 @@ func (h *Handler) transferToMap(mapID int32, portalName string) {
 	newStage.SpawnNPCs()
 
 	// Find spawn portal position and index
-	var spawnPoint byte = 0
+	var spawnPoint byte
 	var posX, posY int16
 
 	if newStage.MapData() != nil {

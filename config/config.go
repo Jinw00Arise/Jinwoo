@@ -14,7 +14,7 @@ type ServerConfig struct {
 
 type LoginConfig struct {
 	ServerConfig
-	DatabaseURL   string
+	DatabaseURL string
 	DebugPackets  bool
 	AutoRegister  bool
 	GameVersion   uint16
@@ -43,7 +43,7 @@ type ChannelConfig struct {
 }
 
 func Load() *LoginConfig {
-	godotenv.Load() // Ignore error - .env is optional
+	_ = godotenv.Load() // Ignore error - .env is optional
 
 	return &LoginConfig{
 		ServerConfig: ServerConfig{
@@ -62,7 +62,7 @@ func Load() *LoginConfig {
 }
 
 func LoadChannel() *ChannelConfig {
-	godotenv.Load()
+	_ = godotenv.Load() // Ignore error - .env is optional
 
 	return &ChannelConfig{
 		ServerConfig: ServerConfig{

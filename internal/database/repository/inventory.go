@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"gorm.io/gorm"
 
@@ -38,7 +39,7 @@ func (r *InventoryRepository) FindByCharacterAndType(ctx context.Context, charac
 func (r *InventoryRepository) FindByCharacterTypeAndSlot(ctx context.Context, characterID uint, invType models.InventoryType, slot int16) (*models.Inventory, error) {
 	var item models.Inventory
 	if err := r.db.WithContext(ctx).Where("character_id = ? AND type = ? AND slot = ?", characterID, byte(invType), slot).First(&item).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, err

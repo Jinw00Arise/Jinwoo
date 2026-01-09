@@ -141,17 +141,17 @@ func waitForResponse(ch chan DialogueResponse) DialogueResponse {
 
 func sendDialogue(session game.Session, npcID int, msgType byte, text string, hasPrev, hasNext bool) {
 	p := buildSayPacket(npcID, msgType, text, hasPrev, hasNext)
-	session.Send(p)
+	_ = session.Send(p) // Ignore send errors in dialogue
 }
 
 func sendDialogueSimple(session game.Session, npcID int, msgType byte, text string) {
 	p := buildSimplePacket(npcID, msgType, text)
-	session.Send(p)
+	_ = session.Send(p) // Ignore send errors in dialogue
 }
 
 func sendDialogueNumber(session game.Session, npcID int, text string, defaultVal, minVal, maxVal int32) {
 	p := buildNumberPacket(npcID, text, defaultVal, minVal, maxVal)
-	session.Send(p)
+	_ = session.Send(p) // Ignore send errors in dialogue
 }
 
 func sendDialogueText(session game.Session, npcID int, text, defaultText string, minLen, maxLen int16) {

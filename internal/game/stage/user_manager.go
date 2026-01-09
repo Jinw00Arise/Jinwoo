@@ -65,7 +65,7 @@ func (um *UserManager) Broadcast(p packet.Packet) {
 	defer um.mu.RUnlock()
 	
 	for _, user := range um.users {
-		user.Write(p)
+		_ = user.Write(p) // Ignore send errors in broadcast
 	}
 }
 
@@ -76,7 +76,7 @@ func (um *UserManager) BroadcastExcept(p packet.Packet, excludeID uint) {
 	
 	for id, user := range um.users {
 		if id != excludeID {
-			user.Write(p)
+			_ = user.Write(p) // Ignore send errors in broadcast
 		}
 	}
 }

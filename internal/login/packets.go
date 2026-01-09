@@ -176,26 +176,22 @@ func writeAvatarLookWithEquips(p *packet.Packet, char *models.Character, equips 
 	
 	// Write equipped items (slot, itemId pairs)
 	// Slot mapping: -5 = top (5), -6 = bottom (6), -7 = shoes (7), -11 = weapon (11)
-	if equips != nil {
-		for _, item := range equips {
-			if item.Slot < 0 && item.Slot > -100 { // Regular equip slots
-				slot := byte(-item.Slot) // Convert negative slot to positive
-				p.WriteByte(slot)
-				p.WriteInt(uint32(item.ItemID))
-			}
+	for _, item := range equips {
+		if item.Slot < 0 && item.Slot > -100 { // Regular equip slots
+			slot := byte(-item.Slot) // Convert negative slot to positive
+			p.WriteByte(slot)
+			p.WriteInt(uint32(item.ItemID))
 		}
 	}
 	p.WriteByte(0xFF) // End hairEquip (-1)
 
 	// anUnseenEquip (cash items that override regular equips)
 	// Cash items use slots -100 to -199
-	if equips != nil {
-		for _, item := range equips {
-			if item.Slot <= -100 { // Cash equip slots
-				slot := byte(-(item.Slot + 100)) // Convert to visible slot
-				p.WriteByte(slot)
-				p.WriteInt(uint32(item.ItemID))
-			}
+	for _, item := range equips {
+		if item.Slot <= -100 { // Cash equip slots
+			slot := byte(-(item.Slot + 100)) // Convert to visible slot
+			p.WriteByte(slot)
+			p.WriteInt(uint32(item.ItemID))
 		}
 	}
 	p.WriteByte(0xFF) // End unseenEquip (-1)
@@ -271,7 +267,7 @@ func parseIP(host string) []byte {
 	// Parse IP string like "127.0.0.1" into 4 bytes
 	ip := make([]byte, 4)
 	var a, b, c, d int
-	fmt.Sscanf(host, "%d.%d.%d.%d", &a, &b, &c, &d)
+	_, _ = fmt.Sscanf(host, "%d.%d.%d.%d", &a, &b, &c, &d) // Ignore parse errors
 	ip[0] = byte(a)
 	ip[1] = byte(b)
 	ip[2] = byte(c)

@@ -100,7 +100,7 @@ func (dm *DataManager) LoadMobData(mobID int32) (*MobData, error) {
 
 	root, err := ParseFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load mob %d: %v", mobID, err)
+		return nil, fmt.Errorf("failed to load mob %d: %w", mobID, err)
 	}
 
 	data := &MobData{

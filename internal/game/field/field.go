@@ -83,7 +83,7 @@ func (f *Field) Broadcast(p packet.Packet) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	for _, s := range f.sessions {
-		s.Send(p)
+		_ = s.Send(p) // Ignore send errors in broadcast
 	}
 }
 
@@ -97,7 +97,7 @@ func (f *Field) BroadcastExcept(p packet.Packet, except game.Session) {
 	}
 	for charID, s := range f.sessions {
 		if charID != exceptID {
-			s.Send(p)
+			_ = s.Send(p) // Ignore send errors in broadcast
 		}
 	}
 }

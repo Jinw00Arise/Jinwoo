@@ -227,7 +227,7 @@ func (h *Handler) handleMobApplyCtrl(reader *packet.Reader) {
 			// Only reassign if user is significantly closer (distance - 20)
 			if userDist < ctrlDist-400 { // 20^2 = 400
 				// Remove control from old controller
-				controller.Connection().Write(MobChangeControllerPacket(false, mob))
+				_ = controller.Connection().Write(MobChangeControllerPacket(false, mob)) // Ignore send errors
 
 				// Assign to new controller
 				mob.SetController(h.user.CharacterID())

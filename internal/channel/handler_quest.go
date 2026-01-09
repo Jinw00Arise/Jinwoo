@@ -390,7 +390,7 @@ func (h *Handler) updateQuestMobKill(mobID int32) {
 		startIdx := mobIndex * 3
 		currentCount := 0
 		if startIdx+3 <= len(progress) {
-			fmt.Sscanf(progress[startIdx:startIdx+3], "%d", &currentCount)
+			_, _ = fmt.Sscanf(progress[startIdx:startIdx+3], "%d", &currentCount) // Ignore parse errors
 		}
 
 		// Check if already complete for this mob

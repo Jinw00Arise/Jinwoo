@@ -235,13 +235,13 @@ func writeFixedString(p *packet.Packet, s string, length int) {
 }
 
 // writeFileTime writes a Windows FILETIME (100-nanosecond intervals since Jan 1, 1601)
-// DEFAULT_TIME is the FILETIME value representing "no expiration" in MapleStory
-const DEFAULT_TIME uint64 = 150842304000000000
+// DefaultTime is the FILETIME value representing "no expiration" in MapleStory
+const DefaultTime uint64 = 150842304000000000
 
 func writeFileTime(p *packet.Packet, t time.Time) {
 	if t.IsZero() {
-		// Use DEFAULT_TIME for permanent/non-expiring items
-		p.WriteLong(DEFAULT_TIME)
+		// Use DefaultTime for permanent/non-expiring items
+		p.WriteLong(DefaultTime)
 		return
 	}
 	// Convert Unix time to Windows FILETIME

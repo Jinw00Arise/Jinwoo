@@ -94,18 +94,18 @@ func (h *Handler) handleCheckPassword(reader *packet.Reader) {
 				account, err = h.accounts.Create(ctx(), username, password)
 				if err != nil {
 					log.Printf("Failed to create account: %v", err)
-					h.conn.Write(LoginFailPacket(maple.LoginSystemError))
+					_ = h.conn.Write(LoginFailPacket(maple.LoginSystemError))
 					return
 				}
 				log.Printf("Auto-registered: %s (id=%d)", username, account.ID)
 			} else {
 				log.Printf("Account not found: %s", username)
-				h.conn.Write(LoginFailPacket(maple.LoginNotRegistered))
+				_ = h.conn.Write(LoginFailPacket(maple.LoginNotRegistered))
 				return
 			}
 		} else {
 			log.Printf("Database error: %v", err)
-			h.conn.Write(LoginFailPacket(maple.LoginSystemError))
+			_ = h.conn.Write(LoginFailPacket(maple.LoginSystemError))
 			return
 		}
 	} else {

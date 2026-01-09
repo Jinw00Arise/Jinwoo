@@ -75,7 +75,8 @@ func NewEngine(scriptsPath string) (*Engine, error) {
 
 // getLuaState gets a Lua state from the pool or creates a new one.
 func (e *Engine) getLuaState() *lua.LState {
-	return e.statePool.Get().(*lua.LState)
+	state, _ := e.statePool.Get().(*lua.LState)
+	return state
 }
 
 // returnLuaState returns a Lua state to the pool.

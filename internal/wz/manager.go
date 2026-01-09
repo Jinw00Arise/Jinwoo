@@ -45,7 +45,9 @@ func Init(wzPath string) error {
 			questChecks: make(map[int]*QuestCheck),
 			questInfo:   make(map[int]*QuestInfo),
 		}
-		instance.loadStrings()
+		if err := instance.loadStrings(); err != nil {
+			log.Printf("Warning: Failed to load strings: %v", err)
+		}
 		instance.loadQuests()
 		instance.LoadAllItemStrings()
 		instance.LoadAllMobStrings()
@@ -70,7 +72,9 @@ func (dm *DataManager) Reload() error {
 	dm.mu.Unlock()
 	
 	// Reload all data
-	dm.loadStrings()
+	if err := dm.loadStrings(); err != nil {
+		log.Printf("Warning: Failed to reload strings: %v", err)
+	}
 	dm.loadQuests()
 	dm.LoadAllItemStrings()
 	dm.LoadAllMobStrings()
