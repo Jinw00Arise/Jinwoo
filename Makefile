@@ -1,6 +1,6 @@
 BINARY_LOGIN=jinwoo-login
 BINARY_CHANNEL=jinwoo-channel
-CHANNEL_COUNT ?= 3
+CHANNEL_COUNT ?= 1
 CHANNEL_BASE_PORT ?= 8585
 
 build: build-login build-channel

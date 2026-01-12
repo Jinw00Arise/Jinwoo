@@ -52,6 +52,8 @@ func (h *Handler) Handle(p protocol.Packet) {
 		h.handleCheckUserLimit(reader)
 	case RecvSelectWorld:
 		h.handleSelectWorld(reader)
+	case RecvCheckDuplicatedID:
+		h.handleCheckDuplicatedID(reader)
 	//case RecvGuestIDLogin:
 	//	h.handleGuestIDLogin(reader)
 	//case RecvAccountInfoRequest:
@@ -64,8 +66,6 @@ func (h *Handler) Handle(p protocol.Packet) {
 	//	h.handleSelectCharacter(reader)
 	//case RecvMigrateIn:
 	//	h.handleMigrateIn(reader)
-	//case RecvCheckDuplicatedID:
-	//	h.handleCheckDuplicatedID(reader)
 	//case RecvCreateNewCharacter:
 	//	h.handleCreateNewCharacter(reader)
 	//case RecvDeleteCharacter:
@@ -194,5 +194,23 @@ func (h *Handler) handleSelectWorld(reader *protocol.Reader) {
 
 	if err := h.conn.Write(SelectWorldResultSuccess(characters, h.characterSlots)); err != nil {
 		log.Printf("[Login] Failed to send char list: %v", err)
+	}
+}
+
+func (h *Handler) handleCheckDuplicatedID(reader *protocol.Reader) {
+	characterName := reader.ReadString()
+	existing, err := h.characters.NameExists(h.ctx, characterName)
+	if err != nil {
+		log.Printf("[Login] Failed to check character name: %v", err)
+		_ = h.conn.Write(CheckDuplicatedIDResult(characterName, DuplicatedIDCheckForbidden))
+		return
+	}
+
+	if existing {
+		log.Printf("[Login] Character name '%s' already exists", characterName)
+		_ = h.conn.Write(CheckDuplicatedIDResult(characterName, DuplicatedIDCheckExists))
+	} else {
+		log.Printf("[Login] Character name '%s' is available", characterName)
+		_ = h.conn.Write(CheckDuplicatedIDResult(characterName, DuplicatedIDCheckSuccess))
 	}
 }

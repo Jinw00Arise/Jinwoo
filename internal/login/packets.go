@@ -8,7 +8,6 @@ import (
 	"github.com/Jinw00Arise/Jinwoo/internal/protocol"
 )
 
-// LoginResult codes
 const (
 	LoginResultSuccess             byte = 0
 	LoginResultTemporaryBlocked    byte = 1
@@ -20,6 +19,12 @@ const (
 	LoginResultAlreadyConnected    byte = 7
 	LoginResultNotConnectableWorld byte = 8
 	LoginResultUnknown             byte = 9
+)
+
+const (
+	DuplicatedIDCheckSuccess   byte = 0
+	DuplicatedIDCheckExists    byte = 1
+	DuplicatedIDCheckForbidden byte = 2
 )
 
 func GenerateClientKey() []byte {
@@ -121,5 +126,12 @@ func SelectWorldResultSuccess(characters []*models.Character, charSlots int) pro
 	p.WriteByte(2) // bLoginOpt
 	p.WriteInt(int32(charSlots))
 	p.WriteInt(0) // nBuyCharCount
+	return p
+}
+
+func CheckDuplicatedIDResult(charName string, result byte) protocol.Packet {
+	p := protocol.NewWithOpcode(SendCheckDuplicatedIDResult)
+	p.WriteString(charName)
+	p.WriteByte(result) // 0: success, 1: exists, 2: cannot use
 	return p
 }

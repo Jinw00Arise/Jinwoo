@@ -41,7 +41,7 @@ func LoadLogin() *LoginConfig {
 		Locale:          8,
 		ChannelHost:     getEnv("CHANNEL_HOST", "127.0.0.1"),
 		ChannelPort:     getEnv("CHANNEL_PORT", "8585"),
-		ChannelCount:    getEnvInt("CHANNEL_COUNT", 3),
+		ChannelCount:    getEnvInt("CHANNEL_COUNT", 1),
 		ChannelBasePort: getEnvInt("CHANNEL_BASE_PORT", 8585),
 	}
 }
