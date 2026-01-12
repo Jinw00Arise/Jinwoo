@@ -149,7 +149,7 @@ func (h *Handler) handleCheckPassword(reader *protocol.Reader) {
 
 func (h *Handler) handleWorldRequest(reader *protocol.Reader) {
 	// TODO: handle multiple channels
-	if err := h.conn.Write(WorldInfo(0, "Scania", 1)); err != nil {
+	if err := h.conn.Write(WorldInfo(0, "Scania", h.config.ChannelCount)); err != nil {
 		log.Printf("[Login] Failed to send world info: %v", err)
 		return
 	}

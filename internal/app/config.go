@@ -12,18 +12,6 @@ type ServerConfig struct {
 	Port string
 }
 
-type LoginConfig struct {
-	ServerConfig
-	DatabaseURL  string
-	DebugPackets bool
-	AutoRegister bool
-	GameVersion  uint16
-	PatchVersion string
-	Locale       byte
-	ChannelHost  string
-	ChannelPort  string
-}
-
 type ChannelConfig struct {
 	ServerConfig
 	DatabaseURL  string
@@ -42,25 +30,6 @@ type ChannelConfig struct {
 	DropRate     float64 // Item drop rate multiplier (default 1.0)
 }
 
-func Load() *LoginConfig {
-	_ = godotenv.Load() // Ignore error - .env is optional
-
-	return &LoginConfig{
-		ServerConfig: ServerConfig{
-			Host: getEnv("LOGIN_HOST", "127.0.0.1"),
-			Port: getEnv("LOGIN_PORT", "8484"),
-		},
-		DatabaseURL:  getEnv("DATABASE_URL", "postgres://localhost:5432/jinwoo?sslmode=disable"),
-		DebugPackets: getEnv("DEBUG_PACKETS", "") != "",
-		AutoRegister: getEnv("AUTO_REGISTER", "") != "",
-		GameVersion:  95,
-		PatchVersion: "1",
-		Locale:       8, // GMS
-		ChannelHost:  getEnv("CHANNEL_HOST", "127.0.0.1"),
-		ChannelPort:  getEnv("CHANNEL_PORT", "8585"),
-	}
-}
-
 func LoadChannel() *ChannelConfig {
 	_ = godotenv.Load() // Ignore error - .env is optional
 
@@ -75,7 +44,7 @@ func LoadChannel() *ChannelConfig {
 		PatchVersion: "1",
 		Locale:       8,
 		WorldID:      0,
-		ChannelID:    0,
+		ChannelID:    getEnvByte("CHANNEL_ID", 0),
 		WZPath:       getEnv("WZ_PATH", "data/wz"),
 		ScriptsPath:  getEnv("SCRIPTS_PATH", "scripts"),
 		ExpRate:      getEnvFloat("EXP_RATE", 1.0),
@@ -96,6 +65,15 @@ func getEnvFloat(key string, fallback float64) float64 {
 	if val := os.Getenv(key); val != "" {
 		if f, err := strconv.ParseFloat(val, 64); err == nil {
 			return f
+		}
+	}
+	return fallback
+}
+
+func getEnvByte(key string, fallback byte) byte {
+	if val := os.Getenv(key); val != "" {
+		if i, err := strconv.ParseInt(val, 10, 8); err == nil {
+			return byte(i)
 		}
 	}
 	return fallback

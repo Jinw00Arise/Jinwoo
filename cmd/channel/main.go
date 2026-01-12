@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -17,6 +18,11 @@ import (
 const shutdownTimeout = 30 * time.Second
 
 func main() {
+	// Parse command-line flags
+	channelID := flag.Int("channel", -1, "Channel ID (overrides env)")
+	port := flag.String("port", "", "Channel port (overrides env)")
+	flag.Parse()
+
 	log.Println("Starting Channel Server")
 
 	if err := crypto.Init(); err != nil {
@@ -24,6 +30,14 @@ func main() {
 	}
 
 	cfg := app.LoadChannel()
+
+	// Override with command-line flags if provided
+	if *channelID >= 0 {
+		cfg.ChannelID = byte(*channelID)
+	}
+	if *port != "" {
+		cfg.Port = *port
+	}
 
 	// Database Connection
 	dbConn, err := db.Connect(cfg.DatabaseURL)

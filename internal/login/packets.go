@@ -72,11 +72,12 @@ func WorldInfo(worldID byte, worldName string, channelCount int) protocol.Packet
 
 	p.WriteByte(byte(channelCount))
 	for i := 0; i < channelCount; i++ {
-		p.WriteString(fmt.Sprintf("%s-%d", worldName, i+1)) // sName
-		p.WriteInt(0)                                       // nUserNo
-		p.WriteByte(worldID)                                // nWorldID
-		p.WriteByte(byte(i))                                // nChannelID
-		p.WriteByte(0)                                      // bAdultChannel
+		channelName := fmt.Sprintf("%s-%d", worldName, i+1)
+		p.WriteString(channelName) // sName
+		p.WriteInt(0)              // nUserNo
+		p.WriteByte(worldID)       // nWorldID
+		p.WriteByte(byte(i))       // nChannelID
+		p.WriteByte(0)             // bAdultChannel
 	}
 
 	p.WriteShort(0) // nBalloonCount
