@@ -1,11 +1,12 @@
-package app
+package channel
 
 import (
 	"context"
 	"log"
 	"net"
 
-	"github.com/Jinw00Arise/Jinwoo/internal/game/interfaces"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/field"
+	"github.com/Jinw00Arise/Jinwoo/internal/interfaces"
 	"github.com/Jinw00Arise/Jinwoo/internal/network"
 )
 
@@ -13,18 +14,20 @@ type Server struct {
 	config      *ChannelConfig
 	characters  interfaces.CharacterRepo
 	inventories interfaces.InventoryRepo
+	fields      *field.Manager
 
 	listener net.Listener
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
 
-func NewServer(cfg *ChannelConfig, chars interfaces.CharacterRepo, inv interfaces.InventoryRepo) *Server {
+func NewServer(cfg *ChannelConfig, chars interfaces.CharacterRepo, inv interfaces.InventoryRepo, fieldMgr *field.Manager) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		config:      cfg,
 		characters:  chars,
 		inventories: inv,
+		fields:      fieldMgr,
 		ctx:         ctx,
 		cancel:      cancel,
 	}
@@ -85,7 +88,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	handler := NewHandler(ctx, c, s.config, s.characters, s.inventories)
+	handler := NewHandler(ctx, c, s.config, s.characters, s.inventories, s.fields)
 
 	for {
 		p, err := c.Read()

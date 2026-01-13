@@ -51,6 +51,16 @@ func (p *Packet) WriteString(s string) {
 	p.WriteShort(uint16(len(s)))
 	*p = append(*p, s...)
 }
+func (p *Packet) WriteStringWithLength(s string, length int) {
+	bytes := []byte(s)
+	if len(bytes) > length {
+		bytes = bytes[:length]
+	}
+	p.WriteBytes(bytes)
+	for i := len(bytes); i < length; i++ {
+		p.WriteByte(0)
+	}
+}
 func (p *Packet) WriteBytes(data []byte) { *p = append(*p, data...) }
 func (p *Packet) WriteBool(v bool) {
 	if v {

@@ -11,7 +11,7 @@ import (
 	"github.com/Jinw00Arise/Jinwoo/internal/crypto"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/db"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/repositories"
-	"github.com/Jinw00Arise/Jinwoo/internal/login"
+	login2 "github.com/Jinw00Arise/Jinwoo/internal/game/login"
 )
 
 const shutdownTimeout = 30 * time.Second
@@ -23,7 +23,7 @@ func main() {
 		log.Fatalf("crypto.Init() failed: %v", err)
 	}
 
-	cfg := login.LoadLogin()
+	cfg := login2.LoadLogin()
 
 	dbConn, err := db.Connect(cfg.DatabaseURL)
 	if err != nil {
@@ -34,7 +34,7 @@ func main() {
 	accRepo := repositories.NewAccountRepository(dbConn)
 	charRepo := repositories.NewCharacterRepo(dbConn)
 
-	srv := login.NewServer(cfg, accRepo, charRepo)
+	srv := login2.NewServer(cfg, accRepo, charRepo)
 
 	// Start server
 	serverErr := make(chan error, 1)

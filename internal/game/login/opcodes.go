@@ -11,7 +11,6 @@ const (
 	RecvWorldRequest         uint16 = 11
 	RecvLogoutWorld          uint16 = 12
 	RecvSelectCharacter      uint16 = 19
-	RecvMigrateIn            uint16 = 20
 	RecvCheckDuplicatedID    uint16 = 21
 	RecvCreateNewCharacter   uint16 = 22
 	RecvDeleteCharacter      uint16 = 24
@@ -46,7 +45,6 @@ var RecvOpcodeNames = map[uint16]string{
 	RecvWorldRequest:         "WorldRequest",
 	RecvLogoutWorld:          "LogoutWorld",
 	RecvSelectCharacter:      "SelectCharacter",
-	RecvMigrateIn:            "MigrateIn",
 	RecvCheckDuplicatedID:    "CheckDuplicatedID",
 	RecvCreateNewCharacter:   "CreateNewCharacter",
 	RecvDeleteCharacter:      "DeleteCharacter",

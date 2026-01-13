@@ -5,7 +5,7 @@ import (
 	"log"
 	"net"
 
-	"github.com/Jinw00Arise/Jinwoo/internal/game/interfaces"
+	"github.com/Jinw00Arise/Jinwoo/internal/interfaces"
 	"github.com/Jinw00Arise/Jinwoo/internal/network"
 )
 

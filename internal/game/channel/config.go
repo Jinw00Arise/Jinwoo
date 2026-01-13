@@ -1,4 +1,4 @@
-package app
+package channel
 
 import (
 	"os"
@@ -45,7 +45,7 @@ func LoadChannel() *ChannelConfig {
 		Locale:       8,
 		WorldID:      0,
 		ChannelID:    getEnvByte("CHANNEL_ID", 0),
-		WZPath:       getEnv("WZ_PATH", "data/wz"),
+		WZPath:       getEnv("WZ_PATH", "internal/data/wz"),
 		ScriptsPath:  getEnv("SCRIPTS_PATH", "scripts"),
 		ExpRate:      getEnvFloat("EXP_RATE", 1.0),
 		QuestExpRate: getEnvFloat("QUEST_EXP_RATE", 1.0),

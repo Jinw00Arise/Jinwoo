@@ -9,10 +9,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Jinw00Arise/Jinwoo/internal/app"
 	"github.com/Jinw00Arise/Jinwoo/internal/crypto"
+	"github.com/Jinw00Arise/Jinwoo/internal/data"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/db"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/repositories"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/channel"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/field"
 )
 
 const shutdownTimeout = 30 * time.Second
@@ -29,7 +31,7 @@ func main() {
 		log.Fatalf("crypto.Init() failed: %v", err)
 	}
 
-	cfg := app.LoadChannel()
+	cfg := channel.LoadChannel()
 
 	// Override with command-line flags if provided
 	if *channelID >= 0 {
@@ -49,7 +51,29 @@ func main() {
 	charRepo := repositories.NewCharacterRepo(dbConn)
 	invRepo := repositories.NewInventoryRepo(dbConn)
 
-	srv := app.NewServer(cfg, charRepo, invRepo)
+	// Create data manager for WZ files
+	dataMgr := data.NewManager(cfg.WZPath)
+
+	// Create field manager with map data integration
+	fieldMgr := field.NewManager(func(mapID int32) (*field.Field, error) {
+		// Create field
+		f := field.NewField(mapID)
+
+		// Load map data from WZ files
+		mapData, err := dataMgr.GetMapData(mapID)
+		if err != nil {
+			log.Printf("[Field] Warning: Failed to load map data for %d: %v", mapID, err)
+			// Continue with default spawn point (0, 0)
+		} else {
+			// Set spawn point from map data
+			f.SetSpawnPoint(mapData.SpawnPoint.X, mapData.SpawnPoint.Y)
+			log.Printf("[Field] Loaded map %d, spawn at (%d, %d)", mapID, mapData.SpawnPoint.X, mapData.SpawnPoint.Y)
+		}
+
+		return f, nil
+	})
+
+	srv := channel.NewServer(cfg, charRepo, invRepo, fieldMgr)
 
 	// Start server
 	serverErr := make(chan error, 1)

@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/Jinw00Arise/Jinwoo/internal/database/models"
-	"github.com/Jinw00Arise/Jinwoo/internal/game/interfaces"
+	"github.com/Jinw00Arise/Jinwoo/internal/interfaces"
 	"gorm.io/gorm"
 )
 

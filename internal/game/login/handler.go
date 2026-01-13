@@ -5,11 +5,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"log"
+	"strconv"
 
 	"github.com/Jinw00Arise/Jinwoo/internal/data/repositories"
-	"github.com/Jinw00Arise/Jinwoo/internal/game/interfaces"
+	"github.com/Jinw00Arise/Jinwoo/internal/database/models"
+	"github.com/Jinw00Arise/Jinwoo/internal/game"
+	"github.com/Jinw00Arise/Jinwoo/internal/interfaces"
 	"github.com/Jinw00Arise/Jinwoo/internal/network"
 	"github.com/Jinw00Arise/Jinwoo/internal/protocol"
+	"github.com/Jinw00Arise/Jinwoo/internal/utils"
 )
 
 type Handler struct {
@@ -23,6 +27,9 @@ type Handler struct {
 	worldID        byte
 	channelID      byte
 	characterSlots int
+	char           *models.Character
+	machineID      []byte
+	clientKey      []byte
 }
 
 func NewHandler(ctx context.Context, conn *network.Connection, cfg *LoginConfig, accounts interfaces.AccountRepo, characters interfaces.CharacterRepo) *Handler {
@@ -54,6 +61,10 @@ func (h *Handler) Handle(p protocol.Packet) {
 		h.handleSelectWorld(reader)
 	case RecvCheckDuplicatedID:
 		h.handleCheckDuplicatedID(reader)
+	case RecvCreateNewCharacter:
+		h.handleCreateNewCharacter(reader)
+	case RecvSelectCharacter:
+		h.handleSelectCharacter(reader)
 	//case RecvGuestIDLogin:
 	//	h.handleGuestIDLogin(reader)
 	//case RecvAccountInfoRequest:
@@ -62,12 +73,6 @@ func (h *Handler) Handle(p protocol.Packet) {
 	//	h.handleWorldInfoRequest(reader)
 	//case RecvLogoutWorld:
 	//	h.handleLogoutWorld(reader)
-	//case RecvSelectCharacter:
-	//	h.handleSelectCharacter(reader)
-	//case RecvMigrateIn:
-	//	h.handleMigrateIn(reader)
-	//case RecvCreateNewCharacter:
-	//	h.handleCreateNewCharacter(reader)
 	//case RecvDeleteCharacter:
 	//	h.handleDeleteCharacter(reader)
 	//case RecvAliveAck:
@@ -212,5 +217,111 @@ func (h *Handler) handleCheckDuplicatedID(reader *protocol.Reader) {
 	} else {
 		log.Printf("[Login] Character name '%s' is available", characterName)
 		_ = h.conn.Write(CheckDuplicatedIDResult(characterName, DuplicatedIDCheckSuccess))
+	}
+}
+
+func (h *Handler) handleCreateNewCharacter(reader *protocol.Reader) {
+	characterName := reader.ReadString()
+	race := reader.ReadInt()
+	subJob := reader.ReadShort()
+
+	selectedItems := struct {
+		face      int32
+		hair      int32
+		hairColor int32
+		skin      int32
+		coat      int32
+		pants     int32
+		shoes     int32
+		weapon    int32
+	}{
+		face:      reader.ReadInt(),
+		hair:      reader.ReadInt(),
+		hairColor: reader.ReadInt(),
+		skin:      reader.ReadInt(),
+		coat:      reader.ReadInt(),
+		pants:     reader.ReadInt(),
+		shoes:     reader.ReadInt(),
+		weapon:    reader.ReadInt(),
+	}
+
+	gender := reader.ReadByte()
+
+	// TODO: add ETC provider forbidden name
+	if !utils.IsValidCharacterName(characterName) {
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultInvalidCharacterName))
+		return
+	}
+	exist, err := h.characters.NameExists(h.ctx, characterName)
+	if err != nil {
+		log.Printf("[Login] Failed to check character name: %v", err)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultInvalidCharacterName))
+		return
+	}
+	if exist {
+		log.Printf("[Login] Character name '%s' already exists (upon creation)", characterName)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultInvalidCharacterName))
+		return
+	}
+
+	if job, ok := game.GetJobByRace(game.Race(race)); ok {
+		if subJob != 0 && !job.IsBeginner() {
+			log.Printf("[Login] Tried to create a character with job : %d and sub job : %d", job, subJob)
+			h.conn.Close()
+			return
+		}
+	}
+
+	// TODO: Use ETC Provider for valid starting items
+
+	if gender < 0 || gender > 2 {
+		log.Printf("[Login] Invalid gender %d for character %s", gender, characterName)
+		h.conn.Close()
+		return
+	}
+
+	finalHair := selectedItems.hair + selectedItems.hairColor
+
+	char := &models.Character{
+		AccountID: h.accountID,
+		WorldID:   h.worldID,
+		Name:      characterName,
+		Gender:    gender,
+		SkinColor: byte(selectedItems.skin),
+		Face:      selectedItems.face,
+		Hair:      finalHair,
+		Level:     1,
+		Job:       0, // TODO: Change by job
+		STR:       12,
+		DEX:       5,
+		INT:       4,
+		LUK:       4,
+		HP:        50, // TODO: Change by job
+		MaxHP:     50,
+		MP:        5,
+		MaxMP:     5,
+		MapID:     10000, // TODO: Change by job
+	}
+
+	created := h.characters.Create(h.ctx, char)
+	if created != nil {
+		log.Printf("[Login] Failed to create character: %v", err)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+		return
+	}
+
+	h.char = char
+	_ = h.conn.Write(CreateNewCharacterResultSuccess(h.char))
+}
+
+func (h *Handler) handleSelectCharacter(reader *protocol.Reader) {
+	characterID := reader.ReadInt()
+	_ = reader.ReadString() // macAddress
+	_ = reader.ReadString() // macAddressWithHDDSerial
+
+	log.Printf("[Login] Selected character: %d", characterID)
+	port, _ := strconv.Atoi(h.config.ChannelPort)
+	if err := h.conn.Write(MigrateCommandResult(h.config.ChannelHost, port, characterID)); err != nil {
+		log.Printf("Failed to send migrate command: %v", err)
 	}
 }
