@@ -173,6 +173,7 @@ func (h *Handler) handleCheckUserLimit(reader *protocol.Reader) {
 
 	if err := h.conn.Write(CheckUserLimitResult()); err != nil {
 		log.Printf("[Login] Failed to send user limit result: %v", err)
+		return
 	}
 }
 
@@ -192,13 +193,15 @@ func (h *Handler) handleSelectWorld(reader *protocol.Reader) {
 	characters, err := h.characters.FindByAccountID(h.ctx, h.accountID, h.worldID)
 	if err != nil {
 		log.Printf("[Login] Failed to find characters: %v", err)
-		characters = nil
+		_ = h.conn.Write(SelectWorldResultFailed(LoginResultSystemError))
+		return
 	}
 
 	// TODO: Add equips
 
 	if err := h.conn.Write(SelectWorldResultSuccess(characters, h.characterSlots)); err != nil {
 		log.Printf("[Login] Failed to send char list: %v", err)
+		return
 	}
 }
 
@@ -213,10 +216,16 @@ func (h *Handler) handleCheckDuplicatedID(reader *protocol.Reader) {
 
 	if existing {
 		log.Printf("[Login] Character name '%s' already exists", characterName)
-		_ = h.conn.Write(CheckDuplicatedIDResult(characterName, DuplicatedIDCheckExists))
+		if err := h.conn.Write(CheckDuplicatedIDResult(characterName, DuplicatedIDCheckExists)); err != nil {
+			log.Printf("[Login] Failed to send duplicate ID result: %v", err)
+			return
+		}
 	} else {
 		log.Printf("[Login] Character name '%s' is available", characterName)
-		_ = h.conn.Write(CheckDuplicatedIDResult(characterName, DuplicatedIDCheckSuccess))
+		if err := h.conn.Write(CheckDuplicatedIDResult(characterName, DuplicatedIDCheckSuccess)); err != nil {
+			log.Printf("[Login] Failed to send duplicate ID result: %v", err)
+			return
+		}
 	}
 }
 
@@ -267,6 +276,7 @@ func (h *Handler) handleCreateNewCharacter(reader *protocol.Reader) {
 	if job, ok := game.GetJobByRace(game.Race(race)); ok {
 		if subJob != 0 && !job.IsBeginner() {
 			log.Printf("[Login] Tried to create a character with job : %d and sub job : %d", job, subJob)
+			_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
 			h.conn.Close()
 			return
 		}
@@ -276,6 +286,7 @@ func (h *Handler) handleCreateNewCharacter(reader *protocol.Reader) {
 
 	if gender < 0 || gender > 2 {
 		log.Printf("[Login] Invalid gender %d for character %s", gender, characterName)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
 		h.conn.Close()
 		return
 	}
@@ -305,13 +316,16 @@ func (h *Handler) handleCreateNewCharacter(reader *protocol.Reader) {
 
 	created := h.characters.Create(h.ctx, char)
 	if created != nil {
-		log.Printf("[Login] Failed to create character: %v", err)
+		log.Printf("[Login] Failed to create character: %v", created)
 		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
 		return
 	}
 
 	h.char = char
-	_ = h.conn.Write(CreateNewCharacterResultSuccess(h.char))
+	if err := h.conn.Write(CreateNewCharacterResultSuccess(h.char)); err != nil {
+		log.Printf("[Login] Failed to send character creation success: %v", err)
+		return
+	}
 }
 
 func (h *Handler) handleSelectCharacter(reader *protocol.Reader) {
@@ -323,5 +337,6 @@ func (h *Handler) handleSelectCharacter(reader *protocol.Reader) {
 	port, _ := strconv.Atoi(h.config.ChannelPort)
 	if err := h.conn.Write(MigrateCommandResult(h.config.ChannelHost, port, characterID)); err != nil {
 		log.Printf("Failed to send migrate command: %v", err)
+		return
 	}
 }

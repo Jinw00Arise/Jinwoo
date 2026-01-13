@@ -73,6 +73,7 @@ func (h *Handler) handleMigrateIn(reader *protocol.Reader) {
 	char, err := h.characters.FindByID(h.ctx, uint(characterID))
 	if err != nil {
 		log.Printf("Failed to load character %d: %v", characterID, err)
+		h.conn.Close()
 		return
 	}
 
@@ -83,6 +84,7 @@ func (h *Handler) handleMigrateIn(reader *protocol.Reader) {
 	targetField, err := h.fields.GetField(char.MapID)
 	if err != nil {
 		log.Printf("Failed to get field %d for character %d: %v", char.MapID, characterID, err)
+		h.conn.Close()
 		return
 	}
 
@@ -101,6 +103,9 @@ func (h *Handler) handleMigrateIn(reader *protocol.Reader) {
 
 	if err := h.conn.Write(SetField(char, int(h.config.ChannelID), h.user.FieldKey())); err != nil {
 		log.Printf("Failed to send SetField: %v", err)
+		// CRITICAL: Remove user from field to prevent state desync
+		targetField.RemoveUser(h.user)
+		h.conn.Close()
 		return
 	}
 
