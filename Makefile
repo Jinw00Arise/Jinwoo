@@ -17,7 +17,6 @@ run: build
 		port=$$(($(CHANNEL_BASE_PORT) + i)); \
 		./bin/$(BINARY_CHANNEL) -channel=$$i -port=$$port & echo $$! > .channel$$i.pid; \
 	done; \
-	trap 'kill $$(cat .login.pid .channel*.pid) 2>/dev/null; rm -f .login.pid .channel*.pid' EXIT INT TERM; \
 	wait
 
 run-login: build-login
@@ -28,12 +27,10 @@ run-channel: build-channel
 		port=$$(($(CHANNEL_BASE_PORT) + i)); \
 		./bin/$(BINARY_CHANNEL) -channel=$$i -port=$$port & echo $$! > .channel$$i.pid; \
 	done; \
-	trap 'kill $$(cat .channel*.pid) 2>/dev/null; rm -f .channel*.pid' EXIT INT TERM; \
 	wait
 
 stop:
 	@pkill -f jinwoo- 2>/dev/null || true
-	@rm -f .login.pid .channel*.pid
 	@echo "Servers stopped"
 
 clean: stop

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/Jinw00Arise/Jinwoo/internal/crypto"
-	"github.com/Jinw00Arise/Jinwoo/internal/data"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/db"
+	"github.com/Jinw00Arise/Jinwoo/internal/data/providers"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/repositories"
 	"github.com/Jinw00Arise/Jinwoo/internal/game/channel"
 	"github.com/Jinw00Arise/Jinwoo/internal/game/field"
@@ -51,27 +51,14 @@ func main() {
 	charRepo := repositories.NewCharacterRepo(dbConn)
 	invRepo := repositories.NewInventoryRepo(dbConn)
 
-	// Create data manager for WZ files
-	dataMgr := data.NewManager(cfg.WZPath)
+	// Initialize WZ data providers
+	log.Printf("[Channel] Loading WZ data from: %s", cfg.WZPath)
+	wzProvider := providers.NewWzProvider(cfg.WZPath)
+	mapProvider := providers.NewMapProvider(wzProvider)
 
-	// Create field manager with map data integration
-	fieldMgr := field.NewManager(func(mapID int32) (*field.Field, error) {
-		// Create field
-		f := field.NewField(mapID)
-
-		// Load map data from WZ files
-		mapData, err := dataMgr.GetMapData(mapID)
-		if err != nil {
-			log.Printf("[Field] Warning: Failed to load map data for %d: %v", mapID, err)
-			// Continue with default spawn point (0, 0)
-		} else {
-			// Set spawn point from map data
-			f.SetSpawnPoint(mapData.SpawnPoint.X, mapData.SpawnPoint.Y)
-			log.Printf("[Field] Loaded map %d, spawn at (%d, %d)", mapID, mapData.SpawnPoint.X, mapData.SpawnPoint.Y)
-		}
-
-		return f, nil
-	})
+	// Create field manager with map provider
+	fieldMgr := field.NewManager(mapProvider)
+	log.Println("[Channel] Field manager initialized")
 
 	srv := channel.NewServer(cfg, charRepo, invRepo, fieldMgr)
 

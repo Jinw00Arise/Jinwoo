@@ -155,12 +155,23 @@ func (u *User) TransferToField(newField *Field, portalName string) {
 		log.Printf("[User] %s left field %d", u.Name(), oldField.ID())
 	}
 
-	// Update position - use spawn point if available, otherwise keep current position
-	// Portal position lookup would need to be implemented in Field if needed
+	// Update position based on portal or spawn point
 	if newField != nil {
-		// Use field's spawn point if set
-		if newField.spawnX != 0 || newField.spawnY != 0 {
-			u.SetPosition(newField.spawnX, newField.spawnY)
+		// If portal name is provided, try to find it
+		if portalName != "" {
+			if portal, exists := newField.GetPortal(portalName); exists {
+				u.SetPosition(portal.X, portal.Y)
+				log.Printf("[User] %s using portal '%s' at (%d, %d)", u.Name(), portalName, portal.X, portal.Y)
+			} else {
+				// Portal not found, use spawn point
+				spawnX, spawnY := newField.SpawnPoint()
+				u.SetPosition(spawnX, spawnY)
+				log.Printf("[User] Portal '%s' not found, using spawn point (%d, %d)", portalName, spawnX, spawnY)
+			}
+		} else {
+			// No portal specified, use spawn point
+			spawnX, spawnY := newField.SpawnPoint()
+			u.SetPosition(spawnX, spawnY)
 		}
 	}
 
@@ -178,4 +189,14 @@ func (u *User) TransferToField(newField *Field, portalName string) {
 		newField.AddUser(u)
 		log.Printf("[User] %s joined field %d at (%d, %d)", u.Name(), newField.ID(), u.posX, u.posY)
 	}
+}
+
+// TransferToSpawnPoint moves the user to the field's default spawn point
+func (u *User) TransferToSpawnPoint(newField *Field) {
+	u.TransferToField(newField, "")
+}
+
+// TransferViaPortal moves the user through a specific portal
+func (u *User) TransferViaPortal(newField *Field, portalName string) {
+	u.TransferToField(newField, portalName)
 }

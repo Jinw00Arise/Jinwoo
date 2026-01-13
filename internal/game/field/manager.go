@@ -1,26 +1,33 @@
 package field
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 
+	"github.com/Jinw00Arise/Jinwoo/internal/data/providers"
 	"golang.org/x/sync/singleflight"
 )
 
-type Manager struct {
-	mu     sync.RWMutex
-	fields map[int32]*Field
-	create func(mapID int32) (*Field, error)
-	sf     singleflight.Group
+// MapDataProvider defines the interface for loading map data
+type MapDataProvider interface {
+	GetMapData(mapID int32) (*providers.MapData, error)
 }
 
-func NewManager(create func(mapID int32) (*Field, error)) *Manager {
-	if create == nil {
-		panic("field.Manager: create func is nil")
+type Manager struct {
+	mu          sync.RWMutex
+	fields      map[int32]*Field
+	mapProvider MapDataProvider
+	sf          singleflight.Group
+}
+
+func NewManager(mapProvider MapDataProvider) *Manager {
+	if mapProvider == nil {
+		panic("field.Manager: mapProvider is nil")
 	}
 	return &Manager{
-		fields: make(map[int32]*Field),
-		create: create,
+		fields:      make(map[int32]*Field),
+		mapProvider: mapProvider,
 	}
 }
 
@@ -44,10 +51,14 @@ func (m *Manager) GetField(mapID int32) (*Field, error) {
 		}
 		m.mu.RUnlock()
 
-		f, err := m.create(mapID) // create starts ticking in New() ideally
+		// Load map data from provider
+		mapData, err := m.mapProvider.GetMapData(mapID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to load map %d: %w", mapID, err)
 		}
+
+		// Create field instance with the map data
+		f := NewField(mapData) // NewField starts ticking
 
 		m.mu.Lock()
 		if existing := m.fields[mapID]; existing != nil {

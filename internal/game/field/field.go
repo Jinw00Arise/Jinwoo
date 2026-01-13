@@ -6,15 +6,14 @@ import (
 	"time"
 
 	"github.com/Jinw00Arise/Jinwoo/internal/consts"
+	"github.com/Jinw00Arise/Jinwoo/internal/data/providers"
 	"github.com/Jinw00Arise/Jinwoo/internal/protocol"
 )
 
 type Field struct {
-	id           int32
+	mapData      *providers.MapData
 	nextObjectID int32
 	users        *UserManager
-	spawnX       int16
-	spawnY       int16
 	mu           sync.RWMutex
 
 	stop      chan struct{}
@@ -22,9 +21,13 @@ type Field struct {
 	closeOnce sync.Once
 }
 
-func NewField(id int32) *Field {
+func NewField(mapData *providers.MapData) *Field {
+	if mapData == nil {
+		panic("field.NewField: mapData is nil")
+	}
+
 	f := &Field{
-		id:           id,
+		mapData:      mapData,
 		nextObjectID: 1000,
 		users:        NewUserManager(),
 		stop:         make(chan struct{}),
@@ -66,7 +69,7 @@ func (f *Field) tickLoop() {
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						log.Printf("[Field %d] Tick panic: %v", f.id, r)
+						log.Printf("[Field %d] Tick panic: %v", f.mapData.ID, r)
 					}
 				}()
 				f.Tick()
@@ -77,26 +80,33 @@ func (f *Field) tickLoop() {
 
 func (f *Field) Tick() {
 	_ = time.Now()
+	// TODO: Update mobs, handle respawns, process movement, etc.
 }
 
 // ID returns the map ID.
 func (f *Field) ID() int32 {
-	return f.id
+	return f.mapData.ID
 }
 
-// SetSpawnPoint sets the default spawn point for this field
-func (f *Field) SetSpawnPoint(x, y int16) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.spawnX = x
-	f.spawnY = y
+// ReturnMap returns the return map ID for this field
+func (f *Field) ReturnMap() int32 {
+	return f.mapData.ReturnMap
 }
 
-// SpawnPoint returns the spawn coordinates
+// SpawnPoint returns the spawn coordinates from map data
 func (f *Field) SpawnPoint() (x, y int16) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.spawnX, f.spawnY
+	return f.mapData.SpawnPoint.X, f.mapData.SpawnPoint.Y
+}
+
+// GetPortal returns a portal by name
+func (f *Field) GetPortal(name string) (providers.Portal, bool) {
+	portal, exists := f.mapData.Portals[name]
+	return portal, exists
+}
+
+// GetPortals returns all portals in this field
+func (f *Field) GetPortals() map[string]providers.Portal {
+	return f.mapData.Portals
 }
 
 // AddUser adds a user to this field.
@@ -106,7 +116,7 @@ func (f *Field) AddUser(u *User) {
 	}
 
 	f.users.Add(u)
-	log.Printf("[Field %d] Added user %s (ID: %d)", f.id, u.Name(), u.CharacterID())
+	log.Printf("[Field %d] Added user %s (ID: %d)", f.mapData.ID, u.Name(), u.CharacterID())
 }
 
 // RemoveUser removes a user from this field.
@@ -116,7 +126,7 @@ func (f *Field) RemoveUser(u *User) {
 	}
 
 	f.users.Remove(u.CharacterID())
-	log.Printf("[Field %d] Removed user %s (ID: %d)", f.id, u.Name(), u.CharacterID())
+	log.Printf("[Field %d] Removed user %s (ID: %d)", f.mapData.ID, u.Name(), u.CharacterID())
 }
 
 // GetUser returns a user by character ID, or nil if not found.
