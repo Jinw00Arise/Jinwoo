@@ -13,18 +13,20 @@ type Server struct {
 	config     *LoginConfig
 	accounts   interfaces.AccountRepo
 	characters interfaces.CharacterRepo
+	items      interfaces.ItemsRepo
 
 	listener net.Listener
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
 
-func NewServer(cfg *LoginConfig, accs interfaces.AccountRepo, chars interfaces.CharacterRepo) *Server {
+func NewServer(cfg *LoginConfig, accs interfaces.AccountRepo, chars interfaces.CharacterRepo, items interfaces.ItemsRepo) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		config:     cfg,
 		accounts:   accs,
 		characters: chars,
+		items:      items,
 		ctx:        ctx,
 		cancel:     cancel,
 	}
@@ -88,7 +90,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	handler := NewHandler(ctx, c, s.config, s.accounts, s.characters)
+	handler := NewHandler(ctx, c, s.config, s.accounts, s.characters, s.items)
 
 	for {
 		p, err := c.Read()

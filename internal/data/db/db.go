@@ -1,7 +1,7 @@
 package db
 
 import (
-	models2 "github.com/Jinw00Arise/Jinwoo/internal/database/models"
+	"github.com/Jinw00Arise/Jinwoo/internal/database/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -15,18 +15,18 @@ func Connect(databaseUrl string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if err := db.AutoMigrate(
-		&models2.Account{},
-		&models2.Character{},
-		&models2.Inventory{},
-		&models2.Skill{},
-		&models2.SkillMacro{},
-		&models2.QuestRecord{},
-		&models2.QuestRecordEx{},
-		&models2.KeyBinding{},
-		&models2.QuickSlot{},
-		&models2.Item{},
+		&models.Account{},
+		&models.Character{},
+		&models.CharacterItem{},
+		&models.Skill{},
+		&models.SkillMacro{},
+		&models.QuestRecord{},
+		&models.QuestRecordEx{},
+		&models.KeyBinding{},
+		&models.QuickSlot{},
+		&models.Item{},
 	); err != nil {
 		return nil, err
 	}

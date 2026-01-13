@@ -24,17 +24,33 @@ func (r *characterRepo) FindByAccountID(ctx context.Context, accountID uint, wor
 	return characters, err
 }
 
-func (r *characterRepo) NameExists(ctx context.Context, name string) (bool, error) {
+func (r *characterRepo) NameExists(ctx context.Context, worldID byte, name string) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).
 		Model(&models.Character{}).
-		Where("name = ?", name).
+		Where("name = ? AND world_id = ?", name, worldID).
 		Count(&count).Error
 	return count > 0, err
 }
 
-func (r *characterRepo) Create(ctx context.Context, char *models.Character) error {
-	return r.db.WithContext(ctx).Create(char).Error
+func (r *characterRepo) Create(ctx context.Context, char *models.Character, items []*models.CharacterItem) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(char).Error; err != nil {
+			return err
+		}
+
+		for _, it := range items {
+			it.CharacterID = char.ID
+		}
+
+		if len(items) > 0 {
+			if err := tx.Create(&items).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 }
 
 func (r *characterRepo) FindByID(ctx context.Context, id uint) (*models.Character, error) {

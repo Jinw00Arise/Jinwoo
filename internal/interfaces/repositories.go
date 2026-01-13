@@ -14,8 +14,8 @@ type AccountRepo interface {
 
 type CharacterRepo interface {
 	FindByAccountID(ctx context.Context, accountID uint, worldID byte) ([]*models.Character, error)
-	NameExists(ctx context.Context, name string) (bool, error)
-	Create(ctx context.Context, char *models.Character) error
+	NameExists(ctx context.Context, worldID byte, name string) (bool, error)
+	Create(ctx context.Context, char *models.Character, items []*models.CharacterItem) error
 	FindByID(ctx context.Context, id uint) (*models.Character, error)
 	Update(ctx context.Context, char *models.Character) error
 }
@@ -25,19 +25,7 @@ type QuestProgressRepo interface {
 	GetQuestRecords(ctx context.Context, characterID uint) ([]*models.QuestRecord, error)
 }
 
-type InventoryRepo interface {
-	FindByCharacterID(ctx context.Context, characterID uint) ([]*models.Inventory, error)
-	FindByCharacterAndType(ctx context.Context, characterID uint, invType models.InventoryType) ([]*models.Inventory, error)
-	FindByCharacterTypeAndSlot(ctx context.Context, characterID uint, invType models.InventoryType, slot int16) (*models.Inventory, error)
-	FindByCharacterAndItemID(ctx context.Context, characterID uint, itemID int32) ([]*models.Inventory, error)
-
-	Create(ctx context.Context, item *models.Inventory) error
-	Update(ctx context.Context, item *models.Inventory) error
-	Delete(ctx context.Context, item *models.Inventory) error
-	DeleteByID(ctx context.Context, id uint) error
-
-	CountByCharacterAndType(ctx context.Context, characterID uint, invType models.InventoryType) (int64, error)
-	GetItemQuantity(ctx context.Context, characterID uint, itemID int32) (int64, error)
-
-	SaveInventory(ctx context.Context, characterID uint, manager interface{ GetAllItems() []*models.Inventory }) error
+type ItemsRepo interface {
+	GetEquippedByCharacterID(ctx context.Context, characterID uint) ([]*models.CharacterItem, error)
+	GetEquippedByCharacterIDs(ctx context.Context, characterIDs []uint) (map[uint][]*models.CharacterItem, error)
 }

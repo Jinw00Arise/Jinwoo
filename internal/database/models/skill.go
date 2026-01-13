@@ -27,3 +27,10 @@ type SkillMacro struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
+
+type SkillCooldown struct {
+	CharacterID uint  `gorm:"primaryKey"`
+	SkillID     int32 `gorm:"primaryKey"`
+
+	ExpiresAt time.Time `gorm:"not null"`
+}

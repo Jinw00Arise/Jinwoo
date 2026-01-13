@@ -33,8 +33,9 @@ func main() {
 
 	accRepo := repositories.NewAccountRepository(dbConn)
 	charRepo := repositories.NewCharacterRepo(dbConn)
+	itemRepo := repositories.NewItemRepo(dbConn)
 
-	srv := login2.NewServer(cfg, accRepo, charRepo)
+	srv := login2.NewServer(cfg, accRepo, charRepo, itemRepo)
 
 	// Start server
 	serverErr := make(chan error, 1)

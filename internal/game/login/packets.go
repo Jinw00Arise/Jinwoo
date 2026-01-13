@@ -116,15 +116,17 @@ func SelectWorldResultFailed(reason byte) protocol.Packet {
 	return p
 }
 
-func SelectWorldResultSuccess(characters []*models.Character, charSlots int) protocol.Packet {
+func SelectWorldResultSuccess(characters []*models.Character, equipsByChar map[uint][]*models.CharacterItem, charSlots int) protocol.Packet {
 	p := protocol.NewWithOpcode(SendSelectWorldResult)
 	p.WriteByte(LoginResultSuccess)
 	p.WriteByte(byte(len(characters)))
+
 	for _, char := range characters {
-		WriteAvatarData(char, &p)
-		p.WriteByte(0) // m_abOnFamily (false)
-		p.WriteByte(0) // hasRank (false - no ranking)
+		WriteAvatarData(char, equipsByChar[char.ID], &p)
+		p.WriteByte(0) // m_abOnFamily
+		p.WriteByte(0) // hasRank
 	}
+
 	p.WriteByte(2) // bLoginOpt
 	p.WriteInt(int32(charSlots))
 	p.WriteInt(0) // nBuyCharCount
@@ -144,14 +146,14 @@ func CreateNewCharacterResultFailed(reason byte) protocol.Packet {
 	return p
 }
 
-func CreateNewCharacterResultSuccess(char *models.Character) protocol.Packet {
+func CreateNewCharacterResultSuccess(char *models.Character, equips []*models.CharacterItem) protocol.Packet {
 	p := protocol.NewWithOpcode(SendCreateNewCharacterResult)
 	p.WriteByte(LoginResultSuccess)
-	WriteAvatarData(char, &p)
+	WriteAvatarData(char, equips, &p)
 	return p
 }
 
-func WriteAvatarData(char *models.Character, p *protocol.Packet) {
+func WriteAvatarData(char *models.Character, equips []*models.CharacterItem, p *protocol.Packet) {
 	p.WriteInt(int32(char.ID))
 	p.WriteStringWithLength(char.Name, 13)
 	p.WriteByte(char.Gender)
@@ -185,36 +187,44 @@ func WriteAvatarData(char *models.Character, p *protocol.Packet) {
 	p.WriteByte(char.SkinColor)
 	p.WriteInt(char.Face)
 
-	// anHairEquip - first write hair, then equipped items
-	p.WriteByte(0) // Hair slot (0)
-	p.WriteInt(char.Hair)
-
-	// TODO: add equips
-	//for _, item := range equips {
-	//	if item.Slot < 0 && item.Slot > -100 { // Regular equip slots
-	//		slot := byte(-item.Slot) // Convert negative slot to positive
-	//		p.WriteByte(slot)
-	//		p.WriteInt(int32(item.ItemID))
-	//	}
-	//}
-	p.WriteByte(0xFF)
-
-	// TODO: add unseen equips
-	//for _, item := range equips {
-	//	if item.Slot <= -100 { // Cash equip slots
-	//		slot := byte(-(item.Slot + 100)) // Convert to visible slot
-	//		p.WriteByte(slot)
-	//		p.WriteInt(int32(item.ItemID))
-	//	}
-	//}
-	p.WriteByte(0xFF) // End unseenEquip (-1)
-	// Find weapon for sticker ID (if it's a cash weapon)
-	p.WriteInt(0) // nWeaponStickerId
+	// --- Look / equips ---
+	writeLookEquips(char, equips, p)
 
 	// anPetID (3 pet item IDs)
 	p.WriteInt(0) // Pet 1
 	p.WriteInt(0) // Pet 2
 	p.WriteInt(0) // Pet 3
+}
+
+func writeLookEquips(char *models.Character, equips []*models.CharacterItem, p *protocol.Packet) {
+	// anHairEquip: first write hair at slot 0
+	p.WriteByte(0) // slot
+	p.WriteInt(char.Hair)
+
+	// visible equips: slots -1..-99 (regular equipped slots)
+	for _, it := range equips {
+		if it.Slot < 0 && it.Slot > -100 {
+			slot := byte(-it.Slot) // negative -> positive
+			p.WriteByte(slot)
+			p.WriteInt(it.ItemID)
+		}
+	}
+	p.WriteByte(0xFF)
+
+	// anUnseenEquip: slots <= -100 (cash/unseen)
+	for _, it := range equips {
+		if it.Slot <= -100 {
+			// common convention: -101.. are cash versions of the slot (depends on version)
+			// Your old comment is ok for most v1xx-like protocols:
+			slot := byte(-(it.Slot + 100))
+			p.WriteByte(slot)
+			p.WriteInt(it.ItemID)
+		}
+	}
+	p.WriteByte(0xFF)
+
+	// Weapon sticker ID (cash weapon cover) — keep 0 for now
+	p.WriteInt(0)
 }
 
 func MigrateCommandResult(host string, port int, characterID int32) protocol.Packet {

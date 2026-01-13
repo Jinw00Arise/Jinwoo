@@ -15,7 +15,6 @@ type Handler struct {
 	conn       *network.Connection
 	config     *ChannelConfig
 	characters interfaces.CharacterRepo
-	inventory  interfaces.InventoryRepo
 	fields     *field.Manager
 
 	machineID []byte
@@ -23,13 +22,12 @@ type Handler struct {
 	user      *field.User
 }
 
-func NewHandler(ctx context.Context, conn *network.Connection, cfg *ChannelConfig, characters interfaces.CharacterRepo, inventories interfaces.InventoryRepo, fields *field.Manager) *Handler {
+func NewHandler(ctx context.Context, conn *network.Connection, cfg *ChannelConfig, characters interfaces.CharacterRepo, fields *field.Manager) *Handler {
 	return &Handler{
 		ctx:        ctx,
 		conn:       conn,
 		config:     cfg,
 		characters: characters,
-		inventory:  inventories,
 		fields:     fields,
 	}
 }

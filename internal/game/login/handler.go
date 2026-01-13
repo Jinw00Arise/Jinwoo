@@ -22,6 +22,7 @@ type Handler struct {
 	config     *LoginConfig
 	accounts   interfaces.AccountRepo
 	characters interfaces.CharacterRepo
+	items      interfaces.ItemsRepo
 
 	accountID      uint
 	worldID        byte
@@ -32,13 +33,14 @@ type Handler struct {
 	clientKey      []byte
 }
 
-func NewHandler(ctx context.Context, conn *network.Connection, cfg *LoginConfig, accounts interfaces.AccountRepo, characters interfaces.CharacterRepo) *Handler {
+func NewHandler(ctx context.Context, conn *network.Connection, cfg *LoginConfig, accounts interfaces.AccountRepo, characters interfaces.CharacterRepo, items interfaces.ItemsRepo) *Handler {
 	return &Handler{
 		ctx:            ctx,
 		conn:           conn,
 		config:         cfg,
 		accounts:       accounts,
 		characters:     characters,
+		items:          items,
 		characterSlots: 3, // TODO: change to var
 	}
 }
@@ -197,9 +199,20 @@ func (h *Handler) handleSelectWorld(reader *protocol.Reader) {
 		return
 	}
 
-	// TODO: Add equips
+	// Bulk load equips for display
+	charIDs := make([]uint, 0, len(characters))
+	for _, c := range characters {
+		charIDs = append(charIDs, c.ID)
+	}
 
-	if err := h.conn.Write(SelectWorldResultSuccess(characters, h.characterSlots)); err != nil {
+	equipsByChar, err := h.items.GetEquippedByCharacterIDs(h.ctx, charIDs)
+	if err != nil {
+		log.Printf("[Login] Failed to load equips: %v", err)
+		_ = h.conn.Write(SelectWorldResultFailed(LoginResultSystemError))
+		return
+	}
+
+	if err := h.conn.Write(SelectWorldResultSuccess(characters, equipsByChar, h.characterSlots)); err != nil {
 		log.Printf("[Login] Failed to send char list: %v", err)
 		return
 	}
@@ -207,7 +220,7 @@ func (h *Handler) handleSelectWorld(reader *protocol.Reader) {
 
 func (h *Handler) handleCheckDuplicatedID(reader *protocol.Reader) {
 	characterName := reader.ReadString()
-	existing, err := h.characters.NameExists(h.ctx, characterName)
+	existing, err := h.characters.NameExists(h.ctx, h.worldID, characterName)
 	if err != nil {
 		log.Printf("[Login] Failed to check character name: %v", err)
 		_ = h.conn.Write(CheckDuplicatedIDResult(characterName, DuplicatedIDCheckForbidden))
@@ -234,7 +247,7 @@ func (h *Handler) handleCreateNewCharacter(reader *protocol.Reader) {
 	race := reader.ReadInt()
 	subJob := reader.ReadShort()
 
-	selectedItems := struct {
+	selected := struct {
 		face      int32
 		hair      int32
 		hairColor int32
@@ -256,15 +269,17 @@ func (h *Handler) handleCreateNewCharacter(reader *protocol.Reader) {
 
 	gender := reader.ReadByte()
 
-	// TODO: add ETC provider forbidden name
+	// Name validation
 	if !utils.IsValidCharacterName(characterName) {
 		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultInvalidCharacterName))
 		return
 	}
-	exist, err := h.characters.NameExists(h.ctx, characterName)
+
+	// IMPORTANT: check name exists per world (and ideally case-insensitive)
+	exist, err := h.characters.NameExists(h.ctx, h.worldID, characterName)
 	if err != nil {
 		log.Printf("[Login] Failed to check character name: %v", err)
-		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultInvalidCharacterName))
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
 		return
 	}
 	if exist {
@@ -273,56 +288,106 @@ func (h *Handler) handleCreateNewCharacter(reader *protocol.Reader) {
 		return
 	}
 
+	// Job validation (as you already do)
 	if job, ok := game.GetJobByRace(game.Race(race)); ok {
 		if subJob != 0 && !job.IsBeginner() {
 			log.Printf("[Login] Tried to create a character with job : %d and sub job : %d", job, subJob)
 			_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
-			h.conn.Close()
+			_ = h.conn.Close()
 			return
 		}
 	}
 
-	// TODO: Use ETC Provider for valid starting items
-
-	if gender < 0 || gender > 2 {
+	// Gender validation
+	if gender > 2 {
 		log.Printf("[Login] Invalid gender %d for character %s", gender, characterName)
 		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
-		h.conn.Close()
+		_ = h.conn.Close()
 		return
 	}
 
-	finalHair := selectedItems.hair + selectedItems.hairColor
+	finalHair := selected.hair + selected.hairColor
 
 	char := &models.Character{
 		AccountID: h.accountID,
 		WorldID:   h.worldID,
 		Name:      characterName,
+		// NameIndex will be set by BeforeSave hook (strings.ToLower)
+
 		Gender:    gender,
-		SkinColor: byte(selectedItems.skin),
-		Face:      selectedItems.face,
+		SkinColor: byte(selected.skin),
+		Face:      selected.face,
 		Hair:      finalHair,
-		Level:     1,
-		Job:       0, // TODO: Change by job
-		STR:       12,
-		DEX:       5,
-		INT:       4,
-		LUK:       4,
-		HP:        50, // TODO: Change by job
-		MaxHP:     50,
-		MP:        5,
-		MaxMP:     5,
-		MapID:     10000, // TODO: Change by job
+
+		Level: 1,
+		Job:   0,
+
+		STR: 12,
+		DEX: 5,
+		INT: 4,
+		LUK: 4,
+
+		HP:    50,
+		MaxHP: 50,
+		MP:    5,
+		MaxMP: 5,
+
+		MapID: 10000, // TODO: change according to job
 	}
 
-	created := h.characters.Create(h.ctx, char)
-	if created != nil {
-		log.Printf("[Login] Failed to create character: %v", created)
+	// Build starting equipped items (InvEquipped + negative slots)
+	equipped := make([]*models.CharacterItem, 0, 4)
+
+	// Only add if non-zero (in case client sends 0)
+	if selected.coat != 0 {
+		equipped = append(equipped, &models.CharacterItem{
+			InvType:  models.InvEquipped,
+			Slot:     models.EquipSlotCoat,
+			ItemID:   selected.coat,
+			Quantity: 1,
+		})
+	}
+	if selected.pants != 0 {
+		equipped = append(equipped, &models.CharacterItem{
+			InvType:  models.InvEquipped,
+			Slot:     models.EquipSlotPants,
+			ItemID:   selected.pants,
+			Quantity: 1,
+		})
+	}
+	if selected.shoes != 0 {
+		equipped = append(equipped, &models.CharacterItem{
+			InvType:  models.InvEquipped,
+			Slot:     models.EquipSlotShoes,
+			ItemID:   selected.shoes,
+			Quantity: 1,
+		})
+	}
+	if selected.weapon != 0 {
+		equipped = append(equipped, &models.CharacterItem{
+			InvType:  models.InvEquipped,
+			Slot:     models.EquipSlotWeapon,
+			ItemID:   selected.weapon,
+			Quantity: 1,
+		})
+	}
+
+	// One transactional create: character + items
+	if err := h.characters.Create(h.ctx, char, equipped); err != nil {
+		log.Printf("[Login] Failed to create character: %v", err)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+		return
+	}
+
+	equips, err := h.items.GetEquippedByCharacterID(h.ctx, char.ID)
+	if err != nil {
+		log.Printf("[Login] Failed to load equips after creation: %v", err)
 		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
 		return
 	}
 
 	h.char = char
-	if err := h.conn.Write(CreateNewCharacterResultSuccess(h.char)); err != nil {
+	if err := h.conn.Write(CreateNewCharacterResultSuccess(h.char, equips)); err != nil {
 		log.Printf("[Login] Failed to send character creation success: %v", err)
 		return
 	}

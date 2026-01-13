@@ -1,32 +1,65 @@
 package models
 
-import "time"
+import (
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type Character struct {
-	ID         uint   `gorm:"primaryKey"`
-	AccountID  uint   `gorm:"index;not null"`
-	WorldID    byte   `gorm:"not null"`
-	Name       string `gorm:"uniqueIndex;size:13;not null"`
-	Gender     byte   `gorm:"default:0"`
-	SkinColor  byte   `gorm:"default:0"`
-	Face       int32  `gorm:"default:20000"`
-	Hair       int32  `gorm:"default:30000"`
-	Level      byte   `gorm:"default:1"`
-	Job        int16  `gorm:"default:0"`
-	STR        int16  `gorm:"default:12"`
-	DEX        int16  `gorm:"default:5"`
-	INT        int16  `gorm:"default:4"`
-	LUK        int16  `gorm:"default:4"`
-	HP         int32  `gorm:"default:50"`
-	MaxHP      int32  `gorm:"default:50"`
-	MP         int32  `gorm:"default:5"`
-	MaxMP      int32  `gorm:"default:5"`
-	AP         int16  `gorm:"default:0"`
-	SP         int16  `gorm:"default:0"`
-	EXP        int32  `gorm:"default:0"`
-	Fame       int16  `gorm:"default:0"`
-	MapID      int32  `gorm:"default:0"`
-	SpawnPoint byte   `gorm:"default:0"`
-	Meso       int32  `gorm:"default:0"`
-	CreatedAt  time.Time
+	ID        uint `gorm:"primaryKey"`
+	AccountID uint `gorm:"index:idx_account_world,not null"`
+	WorldID   byte `gorm:"index:idx_account_world,not null"`
+
+	Name      string `gorm:"size:13;not null"`
+	NameIndex string `gorm:"size:13;not null;index:ux_world_name,unique"` // lower(name)
+
+	Gender    byte  `gorm:"default:0;not null"`
+	SkinColor byte  `gorm:"default:0;not null"`
+	Face      int32 `gorm:"default:20000;not null"`
+	Hair      int32 `gorm:"default:30000;not null"`
+
+	// Stats (you can keep these here)
+	Level      byte  `gorm:"default:1;not null"`
+	Job        int16 `gorm:"default:0;not null"`
+	STR        int16 `gorm:"default:12;not null"`
+	DEX        int16 `gorm:"default:5;not null"`
+	INT        int16 `gorm:"column:int_stat;default:4;not null"` // avoid INT keyword confusion
+	LUK        int16 `gorm:"default:4;not null"`
+	HP         int32 `gorm:"default:50;not null"`
+	MaxHP      int32 `gorm:"default:50;not null"`
+	MP         int32 `gorm:"default:5;not null"`
+	MaxMP      int32 `gorm:"default:5;not null"`
+	AP         int16 `gorm:"default:0;not null"`
+	SP         int16 `gorm:"default:0;not null"`
+	EXP        int32 `gorm:"default:0;not null"`
+	Fame       int16 `gorm:"default:0;not null"`
+	MapID      int32 `gorm:"default:0;not null"`
+	SpawnPoint byte  `gorm:"default:0;not null"`
+
+	Meso int32 `gorm:"default:0;not null"`
+
+	// Cassandra scalar fields you’ll want
+	ExtSlotExpire *time.Time `gorm:""`
+	ItemSNCounter int32      `gorm:"default:0;not null"`
+	FriendMax     int32      `gorm:"default:0;not null"`
+	PartyID       *uint      `gorm:"index"`
+	GuildID       *uint      `gorm:"index"`
+	MaxLevelTime  *time.Time `gorm:""`
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (Character) TableName() string { return "characters" }
+
+type CharacterGormIndexesFix struct {
+	WorldID   byte   `gorm:"index:ux_world_name,unique"`
+	NameIndex string `gorm:"index:ux_world_name,unique"`
+}
+
+func (c *Character) BeforeSave(tx *gorm.DB) error {
+	c.NameIndex = strings.ToLower(c.Name)
+	return nil
 }

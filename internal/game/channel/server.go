@@ -11,25 +11,23 @@ import (
 )
 
 type Server struct {
-	config      *ChannelConfig
-	characters  interfaces.CharacterRepo
-	inventories interfaces.InventoryRepo
-	fields      *field.Manager
+	config     *ChannelConfig
+	characters interfaces.CharacterRepo
+	fields     *field.Manager
 
 	listener net.Listener
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
 
-func NewServer(cfg *ChannelConfig, chars interfaces.CharacterRepo, inv interfaces.InventoryRepo, fieldMgr *field.Manager) *Server {
+func NewServer(cfg *ChannelConfig, chars interfaces.CharacterRepo, fieldMgr *field.Manager) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
-		config:      cfg,
-		characters:  chars,
-		inventories: inv,
-		fields:      fieldMgr,
-		ctx:         ctx,
-		cancel:      cancel,
+		config:     cfg,
+		characters: chars,
+		fields:     fieldMgr,
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 }
 
@@ -91,7 +89,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	handler := NewHandler(ctx, c, s.config, s.characters, s.inventories, s.fields)
+	handler := NewHandler(ctx, c, s.config, s.characters, s.fields)
 
 	for {
 		p, err := c.Read()
