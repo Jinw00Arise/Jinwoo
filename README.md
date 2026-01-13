@@ -18,16 +18,16 @@ A MapleStory v95 server emulator written in Go.
 - [x] Opcode definitions (recv/send)
 - [x] Packet handler routing
 - [x] Account authentication
-- [ ] World list display
-- [ ] Character list display
-- [ ] Character creation
+- [x] World list display
+- [x] Character list display
+- [x] Character creation
 - [ ] Character deletion
-- [ ] Channel migration
+- [x] Channel migration
 
 ### Channel Server
 - [x] Basic channel server setup
-- [ ] Player login and spawn
-- [ ] Map handling
+- [x] Player login and spawn
+- [x] Map handling
 - [ ] Movement packets
 - [ ] Chat system
 - [ ] Inventory system
@@ -54,9 +54,9 @@ A MapleStory v95 server emulator written in Go.
 ### Database
 - [x] Character repository
 - [x] Inventory repository
-- [ ] Account repository
+- [x] Account repository
 - [ ] Item repository
-- [ ] Map repository
+- [x] Map repository
 - [ ] Mob repository
 - [ ] NPC repository
 - [ ] Quest repository
@@ -82,5 +82,6 @@ make build-channel
 ```
 
 ## Configuration
+
 
 Database connection and server settings are configured via environment variables or config files.
