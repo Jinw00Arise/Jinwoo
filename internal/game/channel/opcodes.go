@@ -13,3 +13,7 @@ const (
 var RecvOpcodeNames = map[uint16]string{
 	RecvMigrateIn: "MigrateIn",
 }
+
+var SendOpcodeNames = map[uint16]string{
+	SendSetField: "SetField",
+}

@@ -21,6 +21,10 @@ type Connection struct {
 	conn   net.Conn
 	sendIV []byte
 	recvIV []byte
+
+	// Optional opcode name maps for debug logging
+	recvOpcodeNames map[uint16]string
+	sendOpcodeNames map[uint16]string
 }
 
 func NewConnection(conn net.Conn) *Connection {
@@ -36,6 +40,12 @@ func (c *Connection) Close() error       { return c.conn.Close() }
 func (c *Connection) SendIV() []byte     { return c.sendIV }
 func (c *Connection) RecvIV() []byte     { return c.recvIV }
 
+// SetOpcodeNames sets the opcode name maps for debug logging
+func (c *Connection) SetOpcodeNames(recvNames, sendNames map[uint16]string) {
+	c.recvOpcodeNames = recvNames
+	c.sendOpcodeNames = sendNames
+}
+
 func (c *Connection) WriteRaw(data []byte) error {
 	_, err := c.conn.Write(data)
 	return err
@@ -44,7 +54,13 @@ func (c *Connection) WriteRaw(data []byte) error {
 func (c *Connection) Write(p protocol.Packet) error {
 	if len(p) >= 2 {
 		opcode := uint16(p[0]) | uint16(p[1])<<8
-		log.Printf("[SEND] 0x%04X data=%X", opcode, []byte(p))
+		opcodeName := ""
+		if c.sendOpcodeNames != nil {
+			if name, ok := c.sendOpcodeNames[opcode]; ok {
+				opcodeName = " (" + name + ")"
+			}
+		}
+		log.Printf("[SEND] 0x%04X%s data=%X", opcode, opcodeName, []byte(p))
 	}
 
 	data := p.Clone()
@@ -98,7 +114,13 @@ func (c *Connection) Read() (protocol.Packet, error) {
 
 	if len(data) >= 2 {
 		opcode := uint16(data[0]) | uint16(data[1])<<8
-		log.Printf("[RECV] 0x%04X data=%X", opcode, data)
+		opcodeName := ""
+		if c.recvOpcodeNames != nil {
+			if name, ok := c.recvOpcodeNames[opcode]; ok {
+				opcodeName = " (" + name + ")"
+			}
+		}
+		log.Printf("[RECV] 0x%04X%s data=%X", opcode, opcodeName, data)
 	}
 
 	return protocol.Packet(data), nil

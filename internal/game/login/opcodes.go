@@ -14,7 +14,6 @@ const (
 	RecvCheckDuplicatedID    uint16 = 21
 	RecvCreateNewCharacter   uint16 = 22
 	RecvDeleteCharacter      uint16 = 24
-	RecvAliveAck             uint16 = 25
 	RecvCreateSecurityHandle uint16 = 34
 	RecvClientDumpLog        uint16 = 36
 	RecvUpdateScreenSetting  uint16 = 218
@@ -30,8 +29,6 @@ const (
 	SendCheckDuplicatedIDResult  uint16 = 13
 	SendCreateNewCharacterResult uint16 = 14
 	SendDeleteCharacterResult    uint16 = 15
-	SendMigrateCommand           uint16 = 16
-	SendAliveReq                 uint16 = 17
 	SendLatestConnectedWorld     uint16 = 24
 )
 
@@ -48,7 +45,6 @@ var RecvOpcodeNames = map[uint16]string{
 	RecvCheckDuplicatedID:    "CheckDuplicatedID",
 	RecvCreateNewCharacter:   "CreateNewCharacter",
 	RecvDeleteCharacter:      "DeleteCharacter",
-	RecvAliveAck:             "AliveAck",
 	RecvCreateSecurityHandle: "CreateSecurityHandle",
 	RecvClientDumpLog:        "ClientDumpLog",
 	RecvUpdateScreenSetting:  "RecvUpdateScreenSetting",
@@ -63,7 +59,5 @@ var SendOpcodeNames = map[uint16]string{
 	SendCheckDuplicatedIDResult:  "CheckDuplicatedIDResult",
 	SendCreateNewCharacterResult: "CreateNewCharacterResult",
 	SendDeleteCharacterResult:    "DeleteCharacterResult",
-	SendMigrateCommand:           "MigrateCommand",
-	SendAliveReq:                 "AliveReq",
 	SendLatestConnectedWorld:     "SendLatestConnectedWorld",
 }
