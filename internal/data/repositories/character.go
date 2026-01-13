@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"context"
-	"time"
 
 	"github.com/Jinw00Arise/Jinwoo/internal/database/models"
 	"github.com/Jinw00Arise/Jinwoo/internal/interfaces"
@@ -35,9 +34,6 @@ func (r *characterRepo) NameExists(ctx context.Context, name string) (bool, erro
 }
 
 func (r *characterRepo) Create(ctx context.Context, char *models.Character) error {
-	// If your GORM model has CreatedAt, GORM can manage it automatically.
-	// Keeping this is fine, but consider relying on GORM hooks instead.
-	char.CreatedAt = time.Now()
 	return r.db.WithContext(ctx).Create(char).Error
 }
 
