@@ -3,6 +3,8 @@ package providers
 import (
 	"fmt"
 	"strconv"
+
+	"github.com/Jinw00Arise/Jinwoo/internal/data/providers/wz"
 )
 
 type MapData struct {
@@ -35,62 +37,66 @@ type Foothold struct {
 }
 
 type MapProvider struct {
-	wz *WzProvider
+	wz *wz.WzProvider
 }
 
-func NewMapProvider(wz *WzProvider) *MapProvider {
-	return &MapProvider{wz: wz}
+func NewMapProvider(wzProvider *wz.WzProvider) *MapProvider {
+	return &MapProvider{wz: wzProvider}
 }
 
 func (p *MapProvider) GetMapData(mapID int32) (*MapData, error) {
-	// Determine map file path
-	// Maps are organized like: Map/Map1/100000000.img.xml
+	// Maps are organized like: Map.wz/Map/Map1/100000000.img.xml
 	folder := fmt.Sprintf("Map%d", mapID/100000000)
-	filename := fmt.Sprintf("%09d.img.xml", mapID)
-	path := fmt.Sprintf("Map.wz/Map/%s/%s", folder, filename)
+	filename := fmt.Sprintf("%09d", mapID)
 
-	// Load the IMG
-	root, err := p.wz.GetImg(path)
+	mapDir := p.wz.Dir("Map.wz").Dir("Map").Dir(folder)
+	img, err := mapDir.Image(filename)
 	if err != nil {
-		// Return default map data for missing maps
-		return &MapData{
-			ID:        mapID,
-			ReturnMap: mapID,
-			SpawnPoint: Portal{
-				Name: "sp",
-				X:    0,
-				Y:    0,
-			},
-			Portals: make(map[string]Portal),
-		}, nil
+		return nil, fmt.Errorf("could not load map %d: %w", mapID, err)
+	}
+
+	root := img.Root()
+	if root == nil {
+		return nil, fmt.Errorf("map %d has no root", mapID)
 	}
 
 	return p.parseMapData(mapID, root)
 }
 
-func (p *MapProvider) parseMapData(mapID int32, root *ImgDir) (*MapData, error) {
+func (p *MapProvider) parseMapData(mapID int32, root *wz.ImgDir) (*MapData, error) {
 	mapData := &MapData{
 		ID:      mapID,
 		Portals: make(map[string]Portal),
 	}
 
 	// Parse info section
-	if info := root.Get("info"); info != nil {
-		mapData.ReturnMap = info.GetIntOrDefault("returnMap", mapID)
-		mapData.ForcedReturn = info.GetIntOrDefault("forcedReturn", 999999999)
+	info := root.Get("info")
+	if info == nil {
+		return nil, fmt.Errorf("map %d missing info section", mapID)
+	}
+
+	returnMap, err := info.GetInt("returnMap")
+	if err != nil {
+		return nil, fmt.Errorf("map %d: %w", mapID, err)
+	}
+	mapData.ReturnMap = returnMap
+
+	forcedReturn, err := info.GetInt("forcedReturn")
+	if err != nil {
+		// forcedReturn might be optional, use returnMap as fallback
+		mapData.ForcedReturn = returnMap
+	} else {
+		mapData.ForcedReturn = forcedReturn
 	}
 
 	// Parse portals
 	if portalSection := root.Get("portal"); portalSection != nil {
 		for i := range portalSection.ImgDirs {
 			portalDir := &portalSection.ImgDirs[i]
-			portal := Portal{
-				Name: portalDir.GetStringOrDefault("pn", ""),
-				Type: portalDir.GetIntOrDefault("pt", 0),
-				X:    int16(portalDir.GetIntOrDefault("x", 0)),
-				Y:    int16(portalDir.GetIntOrDefault("y", 0)),
-				TM:   portalDir.GetIntOrDefault("tm", 999999999),
-				TN:   portalDir.GetStringOrDefault("tn", ""),
+
+			portal, err := p.parsePortal(portalDir)
+			if err != nil {
+				return nil, fmt.Errorf("map %d portal %s: %w", mapID, portalDir.Name, err)
 			}
 
 			// First "sp" portal is the spawn point
@@ -106,42 +112,128 @@ func (p *MapProvider) parseMapData(mapID int32, root *ImgDir) (*MapData, error) 
 
 	// Parse footholds
 	if footholdSection := root.Get("foothold"); footholdSection != nil {
-		mapData.Footholds = p.parseFootholds(footholdSection)
-	}
-
-	// If no spawn point found, use default
-	if mapData.SpawnPoint.Name == "" {
-		mapData.SpawnPoint = Portal{Name: "sp", X: 0, Y: 0}
+		footholds, err := p.parseFootholds(footholdSection)
+		if err != nil {
+			return nil, fmt.Errorf("map %d footholds: %w", mapID, err)
+		}
+		mapData.Footholds = footholds
 	}
 
 	return mapData, nil
 }
 
-func (p *MapProvider) parseFootholds(root *ImgDir) []Foothold {
+func (p *MapProvider) parsePortal(portalDir *wz.ImgDir) (Portal, error) {
+	portal := Portal{}
+
+	pn, err := portalDir.GetString("pn")
+	if err != nil {
+		return portal, fmt.Errorf("missing pn: %w", err)
+	}
+	portal.Name = pn
+
+	pt, err := portalDir.GetInt("pt")
+	if err != nil {
+		return portal, fmt.Errorf("missing pt: %w", err)
+	}
+	portal.Type = pt
+
+	x, err := portalDir.GetInt("x")
+	if err != nil {
+		return portal, fmt.Errorf("missing x: %w", err)
+	}
+	portal.X = int16(x)
+
+	y, err := portalDir.GetInt("y")
+	if err != nil {
+		return portal, fmt.Errorf("missing y: %w", err)
+	}
+	portal.Y = int16(y)
+
+	// tm and tn are optional (not all portals have targets)
+	if tm, err := portalDir.GetInt("tm"); err == nil {
+		portal.TM = tm
+	}
+	if tn, err := portalDir.GetString("tn"); err == nil {
+		portal.TN = tn
+	}
+
+	return portal, nil
+}
+
+func (p *MapProvider) parseFootholds(root *wz.ImgDir) ([]Foothold, error) {
 	var footholds []Foothold
 
 	// Footholds are nested: foothold/layer/group/foothold
-	for _, layerDir := range root.ImgDirs {
-		layer, _ := strconv.ParseInt(layerDir.Name, 10, 32)
+	for i := range root.ImgDirs {
+		layerDir := &root.ImgDirs[i]
+		layer, err := strconv.ParseInt(layerDir.Name, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid layer name %s: %w", layerDir.Name, err)
+		}
 
-		for _, groupDir := range layerDir.ImgDirs {
-			for _, fhDir := range groupDir.ImgDirs {
-				fhID, _ := strconv.ParseInt(fhDir.Name, 10, 32)
+		for j := range layerDir.ImgDirs {
+			groupDir := &layerDir.ImgDirs[j]
 
-				fh := Foothold{
-					ID:    int32(fhID),
-					Layer: int32(layer),
-					X1:    int16(fhDir.GetIntOrDefault("x1", 0)),
-					Y1:    int16(fhDir.GetIntOrDefault("y1", 0)),
-					X2:    int16(fhDir.GetIntOrDefault("x2", 0)),
-					Y2:    int16(fhDir.GetIntOrDefault("y2", 0)),
-					Prev:  fhDir.GetIntOrDefault("prev", 0),
-					Next:  fhDir.GetIntOrDefault("next", 0),
+			for k := range groupDir.ImgDirs {
+				fhDir := &groupDir.ImgDirs[k]
+				fhID, err := strconv.ParseInt(fhDir.Name, 10, 32)
+				if err != nil {
+					return nil, fmt.Errorf("invalid foothold id %s: %w", fhDir.Name, err)
+				}
+
+				fh, err := p.parseFoothold(fhDir, int32(fhID), int32(layer))
+				if err != nil {
+					return nil, fmt.Errorf("foothold %d: %w", fhID, err)
 				}
 				footholds = append(footholds, fh)
 			}
 		}
 	}
 
-	return footholds
+	return footholds, nil
+}
+
+func (p *MapProvider) parseFoothold(fhDir *wz.ImgDir, id, layer int32) (Foothold, error) {
+	fh := Foothold{
+		ID:    id,
+		Layer: layer,
+	}
+
+	x1, err := fhDir.GetInt("x1")
+	if err != nil {
+		return fh, fmt.Errorf("missing x1: %w", err)
+	}
+	fh.X1 = int16(x1)
+
+	y1, err := fhDir.GetInt("y1")
+	if err != nil {
+		return fh, fmt.Errorf("missing y1: %w", err)
+	}
+	fh.Y1 = int16(y1)
+
+	x2, err := fhDir.GetInt("x2")
+	if err != nil {
+		return fh, fmt.Errorf("missing x2: %w", err)
+	}
+	fh.X2 = int16(x2)
+
+	y2, err := fhDir.GetInt("y2")
+	if err != nil {
+		return fh, fmt.Errorf("missing y2: %w", err)
+	}
+	fh.Y2 = int16(y2)
+
+	prev, err := fhDir.GetInt("prev")
+	if err != nil {
+		return fh, fmt.Errorf("missing prev: %w", err)
+	}
+	fh.Prev = prev
+
+	next, err := fhDir.GetInt("next")
+	if err != nil {
+		return fh, fmt.Errorf("missing next: %w", err)
+	}
+	fh.Next = next
+
+	return fh, nil
 }

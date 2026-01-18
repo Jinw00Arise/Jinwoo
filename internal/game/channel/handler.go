@@ -15,6 +15,7 @@ type Handler struct {
 	conn       *network.Connection
 	config     *ChannelConfig
 	characters interfaces.CharacterRepo
+	items      interfaces.ItemsRepo
 	fields     *field.Manager
 
 	machineID []byte
@@ -22,12 +23,13 @@ type Handler struct {
 	user      *field.User
 }
 
-func NewHandler(ctx context.Context, conn *network.Connection, cfg *ChannelConfig, characters interfaces.CharacterRepo, fields *field.Manager) *Handler {
+func NewHandler(ctx context.Context, conn *network.Connection, cfg *ChannelConfig, characters interfaces.CharacterRepo, items interfaces.ItemsRepo, fields *field.Manager) *Handler {
 	return &Handler{
 		ctx:        ctx,
 		conn:       conn,
 		config:     cfg,
 		characters: characters,
+		items:      items,
 		fields:     fields,
 	}
 }
@@ -75,8 +77,16 @@ func (h *Handler) handleMigrateIn(reader *protocol.Reader) {
 		return
 	}
 
+	items, err := h.items.GetByCharacterID(h.ctx, uint(characterID))
+	if err != nil {
+		log.Printf("Failed to load items for character %d: %v", characterID, err)
+		h.conn.Close()
+		return
+	}
+
 	// Create user instance
 	h.user = field.NewUser(h.conn, char)
+	h.user.SetItems(items)
 
 	// Get or create the field for this character's map
 	targetField, err := h.fields.GetField(char.MapID)
@@ -99,7 +109,7 @@ func (h *Handler) handleMigrateIn(reader *protocol.Reader) {
 	posX, posY := h.user.Position()
 	log.Printf("Player %s (id=%d) entering game at (%d, %d)", char.Name, char.ID, posX, posY)
 
-	if err := h.conn.Write(SetField(char, int(h.config.ChannelID), h.user.FieldKey())); err != nil {
+	if err := h.conn.Write(SetField(char, int(h.config.ChannelID), h.user.FieldKey(), items)); err != nil {
 		log.Printf("Failed to send SetField: %v", err)
 		// CRITICAL: Remove user from field to prevent state desync
 		targetField.RemoveUser(h.user)
@@ -108,19 +118,4 @@ func (h *Handler) handleMigrateIn(reader *protocol.Reader) {
 	}
 
 	log.Printf("Player %s spawned on map %d", char.Name, char.MapID)
-}
-
-func (h *Handler) handlePlayerLoaded(reader *protocol.Reader) {
-	if h.user == nil {
-		log.Printf("[Channel] PlayerLoaded received but no user")
-		return
-	}
-
-	log.Printf("[Channel] Player %s loaded and ready", h.user.Name())
-
-	// TODO: Send initial game state
-	// - Spawn other players in field
-	// - Spawn NPCs
-	// - Spawn mobs
-	// - Send items on ground
 }

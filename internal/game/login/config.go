@@ -24,6 +24,7 @@ type LoginConfig struct {
 	ChannelBasePort int
 	ChannelHost     string
 	ChannelPort     string
+	WZPath          string
 }
 
 func LoadLogin() *LoginConfig {
@@ -43,6 +44,7 @@ func LoadLogin() *LoginConfig {
 		ChannelPort:     getEnv("CHANNEL_PORT", "8585"),
 		ChannelCount:    getEnvInt("CHANNEL_COUNT", 1),
 		ChannelBasePort: getEnvInt("CHANNEL_BASE_PORT", 8585),
+		WZPath:          getEnv("WZ_PATH", "./wz"),
 	}
 }
 

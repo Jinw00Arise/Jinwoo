@@ -12,6 +12,7 @@ import (
 type User struct {
 	conn      *network.Connection
 	character *models.Character
+	items     []*models.CharacterItem
 
 	// Current field and position
 	field    *Field
@@ -199,4 +200,18 @@ func (u *User) TransferToSpawnPoint(newField *Field) {
 // TransferViaPortal moves the user through a specific portal
 func (u *User) TransferViaPortal(newField *Field, portalName string) {
 	u.TransferToField(newField, portalName)
+}
+
+func (u *User) SetItems(items []*models.CharacterItem) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	u.items = items
+}
+
+func (u *User) Items() []*models.CharacterItem {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	return u.items
 }

@@ -28,4 +28,5 @@ type QuestProgressRepo interface {
 type ItemsRepo interface {
 	GetEquippedByCharacterID(ctx context.Context, characterID uint) ([]*models.CharacterItem, error)
 	GetEquippedByCharacterIDs(ctx context.Context, characterIDs []uint) (map[uint][]*models.CharacterItem, error)
+	GetByCharacterID(ctx context.Context, characterID uint) ([]*models.CharacterItem, error)
 }

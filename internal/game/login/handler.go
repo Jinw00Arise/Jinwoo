@@ -7,6 +7,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/Jinw00Arise/Jinwoo/internal/data/providers"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/repositories"
 	"github.com/Jinw00Arise/Jinwoo/internal/database/models"
 	"github.com/Jinw00Arise/Jinwoo/internal/game"
@@ -17,12 +18,13 @@ import (
 )
 
 type Handler struct {
-	ctx        context.Context
-	conn       *network.Connection
-	config     *LoginConfig
-	accounts   interfaces.AccountRepo
-	characters interfaces.CharacterRepo
-	items      interfaces.ItemsRepo
+	ctx          context.Context
+	conn         *network.Connection
+	config       *LoginConfig
+	accounts     interfaces.AccountRepo
+	characters   interfaces.CharacterRepo
+	items        interfaces.ItemsRepo
+	itemProvider *providers.ItemProvider
 
 	accountID      uint
 	worldID        byte
@@ -33,7 +35,7 @@ type Handler struct {
 	clientKey      []byte
 }
 
-func NewHandler(ctx context.Context, conn *network.Connection, cfg *LoginConfig, accounts interfaces.AccountRepo, characters interfaces.CharacterRepo, items interfaces.ItemsRepo) *Handler {
+func NewHandler(ctx context.Context, conn *network.Connection, cfg *LoginConfig, accounts interfaces.AccountRepo, characters interfaces.CharacterRepo, items interfaces.ItemsRepo, itemProv *providers.ItemProvider) *Handler {
 	return &Handler{
 		ctx:            ctx,
 		conn:           conn,
@@ -41,6 +43,7 @@ func NewHandler(ctx context.Context, conn *network.Connection, cfg *LoginConfig,
 		accounts:       accounts,
 		characters:     characters,
 		items:          items,
+		itemProvider:   itemProv,
 		characterSlots: 3, // TODO: change to var
 	}
 }
@@ -340,36 +343,24 @@ func (h *Handler) handleCreateNewCharacter(reader *protocol.Reader) {
 
 	// Only add if non-zero (in case client sends 0)
 	if selected.coat != 0 {
-		equipped = append(equipped, &models.CharacterItem{
-			InvType:  models.InvEquipped,
-			Slot:     models.EquipSlotCoat,
-			ItemID:   selected.coat,
-			Quantity: 1,
-		})
+		if coatInfo := h.itemProvider.GetItemInfo(selected.coat); coatInfo != nil {
+			equipped = append(equipped, utils.NewEquipFromItemInfo(coatInfo, models.InvEquipped, models.EquipSlotCoat))
+		}
 	}
 	if selected.pants != 0 {
-		equipped = append(equipped, &models.CharacterItem{
-			InvType:  models.InvEquipped,
-			Slot:     models.EquipSlotPants,
-			ItemID:   selected.pants,
-			Quantity: 1,
-		})
+		if pantsInfo := h.itemProvider.GetItemInfo(selected.pants); pantsInfo != nil {
+			equipped = append(equipped, utils.NewEquipFromItemInfo(pantsInfo, models.InvEquipped, models.EquipSlotPants))
+		}
 	}
 	if selected.shoes != 0 {
-		equipped = append(equipped, &models.CharacterItem{
-			InvType:  models.InvEquipped,
-			Slot:     models.EquipSlotShoes,
-			ItemID:   selected.shoes,
-			Quantity: 1,
-		})
+		if shoesInfo := h.itemProvider.GetItemInfo(selected.shoes); shoesInfo != nil {
+			equipped = append(equipped, utils.NewEquipFromItemInfo(shoesInfo, models.InvEquipped, models.EquipSlotShoes))
+		}
 	}
 	if selected.weapon != 0 {
-		equipped = append(equipped, &models.CharacterItem{
-			InvType:  models.InvEquipped,
-			Slot:     models.EquipSlotWeapon,
-			ItemID:   selected.weapon,
-			Quantity: 1,
-		})
+		if weaponInfo := h.itemProvider.GetItemInfo(selected.weapon); weaponInfo != nil {
+			equipped = append(equipped, utils.NewEquipFromItemInfo(weaponInfo, models.InvEquipped, models.EquipSlotWeapon))
+		}
 	}
 
 	// One transactional create: character + items

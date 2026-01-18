@@ -45,3 +45,12 @@ func (r *itemRepo) GetEquippedByCharacterIDs(ctx context.Context, characterIDs [
 	}
 	return out, nil
 }
+
+func (r *itemRepo) GetByCharacterID(ctx context.Context, characterID uint) ([]*models.CharacterItem, error) {
+	var items []*models.CharacterItem
+	err := r.db.WithContext(ctx).
+		Where("character_id = ?", characterID).
+		Order("inv_type asc, slot asc").
+		Find(&items).Error
+	return items, err
+}

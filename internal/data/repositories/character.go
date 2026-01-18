@@ -41,9 +41,18 @@ func (r *characterRepo) Create(ctx context.Context, char *models.Character, item
 
 		for _, it := range items {
 			it.CharacterID = char.ID
+
+			// Increment counter and assign unique SN
+			char.ItemSNCounter++
+			it.ItemSN = int64(char.ItemSNCounter)
 		}
 
 		if len(items) > 0 {
+			if err := tx.Model(char).Update("item_sn_counter", char.ItemSNCounter).Error; err != nil {
+				return err
+			}
+
+			// Save all items with SNs
 			if err := tx.Create(&items).Error; err != nil {
 				return err
 			}

@@ -12,6 +12,7 @@ import (
 	"github.com/Jinw00Arise/Jinwoo/internal/crypto"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/db"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/providers"
+	"github.com/Jinw00Arise/Jinwoo/internal/data/providers/wz"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/repositories"
 	"github.com/Jinw00Arise/Jinwoo/internal/game/channel"
 	"github.com/Jinw00Arise/Jinwoo/internal/game/field"
@@ -49,17 +50,18 @@ func main() {
 	log.Println("[Channel] Database connected")
 
 	charRepo := repositories.NewCharacterRepo(dbConn)
+	itemRepo := repositories.NewItemRepo(dbConn)
 
 	// Initialize WZ data providers
 	log.Printf("[Channel] Loading WZ data from: %s", cfg.WZPath)
-	wzProvider := providers.NewWzProvider(cfg.WZPath)
+	wzProvider := wz.NewWzProvider(cfg.WZPath)
 	mapProvider := providers.NewMapProvider(wzProvider)
 
 	// Create field manager with map provider
 	fieldMgr := field.NewManager(mapProvider)
 	log.Println("[Channel] Field manager initialized")
 
-	srv := channel.NewServer(cfg, charRepo, fieldMgr)
+	srv := channel.NewServer(cfg, charRepo, itemRepo, fieldMgr)
 
 	// Start server
 	serverErr := make(chan error, 1)

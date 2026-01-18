@@ -6,9 +6,10 @@ import (
 
 	"github.com/Jinw00Arise/Jinwoo/internal/database/models"
 	"github.com/Jinw00Arise/Jinwoo/internal/protocol"
+	"github.com/Jinw00Arise/Jinwoo/internal/utils"
 )
 
-func SetField(char *models.Character, channelID int, fieldKey byte) protocol.Packet {
+func SetField(char *models.Character, channelID int, fieldKey byte, items []*models.CharacterItem) protocol.Packet {
 	p := protocol.NewWithOpcode(SendSetField)
 
 	// SetField header
@@ -29,7 +30,7 @@ func SetField(char *models.Character, channelID int, fieldKey byte) protocol.Pac
 	p.WriteInt(s3)
 
 	// CharacterData::Decode
-	writeCharacterDataFull(&p, char)
+	writeCharacterDataFull(&p, char, items)
 
 	// CWvsContext::OnSetLogoutGiftConfig
 	p.WriteInt(0) // bPredictQuit
@@ -39,17 +40,16 @@ func SetField(char *models.Character, channelID int, fieldKey byte) protocol.Pac
 	p.WriteInt(0)
 
 	// ftServer - current server time
-	writeFileTime(&p, time.Now())
+	writeFT(&p, &time.Time{})
 
 	return p
 }
 
-func writeCharacterDataFull(p *protocol.Packet, char *models.Character) {
+func writeCharacterDataFull(p *protocol.Packet, char *models.Character, items []*models.CharacterItem) {
 	// DBChar flag - ALL = -1 (0xFFFFFFFFFFFFFFFF as unsigned)
-	p.WriteLong(0xFFFFFFFFFFFFFFFF)
-
-	p.WriteByte(0)     // nCombatOrders
-	p.WriteBool(false) // some bool -> if true: byte, int*FT, int*FT
+	p.WriteLong(0xFFFFFFFFFFFFFFFF) // TODO: Support multiple flags
+	p.WriteByte(0)                  // nCombatOrders
+	p.WriteBool(false)              // some bool -> if true: byte, int*FT, int*FT
 
 	// CHARACTER flag
 	writeCharacterStat(p, char)
@@ -67,27 +67,9 @@ func writeCharacterDataFull(p *protocol.Packet, char *models.Character) {
 	p.WriteByte(24) // Cash slots
 
 	// EQUIPEXT flag (FileTime)
-	writeFileTime(p, time.Time{}) // Default/zero time
+	writeFT(p, &time.Time{}) // Default/zero time
 
-	// ITEMSLOTEQUIP flag
-	// Empty inventory - write terminators
-	p.WriteShort(0) // Normal equipped items terminator
-	p.WriteShort(0) // Cash equipped items terminator
-	p.WriteShort(0) // Equip inventory terminator
-	p.WriteShort(0) // Dragon equips terminator
-	p.WriteShort(0) // Mechanic equips terminator
-
-	// ITEMSLOTCONSUME flag
-	p.WriteByte(0) // Terminator
-
-	// ITEMSLOTINSTALL flag
-	p.WriteByte(0) // Terminator
-
-	// ITEMSLOTETC flag
-	p.WriteByte(0) // Terminator
-
-	// ITEMSLOTCASH flag
-	p.WriteByte(0) // Terminator
+	writeInventoryBlocks(p, items)
 
 	// SKILLRECORD flag
 	p.WriteShort(0) // No skills
@@ -181,19 +163,242 @@ func writeCharacterStat(p *protocol.Packet, char *models.Character) {
 	p.WriteShort(0)                 // nSubJob
 }
 
-const DefaultTime uint64 = 150842304000000000
+func writeInventoryBlocks(p *protocol.Packet, items []*models.CharacterItem) {
+	var equipped, equipInv, consume, install, etcInv, cashInv []*models.CharacterItem
 
-func writeFileTime(p *protocol.Packet, t time.Time) {
-	if t.IsZero() {
-		// Use DefaultTime for permanent/non-expiring items
-		p.WriteLong(DefaultTime)
+	for _, it := range items {
+		switch it.InvType {
+		case models.InvEquipped:
+			equipped = append(equipped, it)
+		case models.InvEquip:
+			equipInv = append(equipInv, it)
+		case models.InvConsume:
+			consume = append(consume, it)
+		case models.InvInstall:
+			install = append(install, it)
+		case models.InvEtc:
+			etcInv = append(etcInv, it)
+		case models.InvCash:
+			cashInv = append(cashInv, it)
+		}
+	}
+
+	// --- ITEMSLOTEQUIP (5 sub-blocks) ---
+
+	// Normal equipped (body part = -slot, e.g., slot -5 -> body part 5)
+	for _, it := range equipped {
+		if it.Slot < 0 && it.Slot > -100 {
+			bodyPart := uint16(-it.Slot) // Convert negative slot to positive body part
+			p.WriteShort(bodyPart)
+			encodeItem(p, it)
+		}
+	}
+	p.WriteShort(0)
+
+	// Cash equipped (slot <= -100, e.g., slot -105 -> body part 5)
+	for _, it := range equipped {
+		if it.Slot <= -100 && it.Slot > -200 {
+			bodyPart := uint16(-(it.Slot + 100)) // Convert cash slot to positive body part
+			p.WriteShort(bodyPart)
+			encodeItem(p, it)
+		}
+	}
+	p.WriteShort(0)
+
+	// Equip inventory
+	for _, it := range equipInv {
+		p.WriteShort(uint16(int16(it.Slot)))
+		encodeItem(p, it)
+	}
+	p.WriteShort(0)
+
+	// Dragon equips (leave empty for now unless you support it)
+	p.WriteShort(0)
+
+	// Mechanic equips (leave empty for now unless you support it)
+	p.WriteShort(0)
+
+	// --- ITEMSLOTCONSUME ---
+	for _, it := range consume {
+		p.WriteByte(byte(it.Slot))
+		encodeItem(p, it)
+	}
+	p.WriteByte(0)
+
+	// --- ITEMSLOTINSTALL ---
+	for _, it := range install {
+		p.WriteByte(byte(it.Slot))
+		encodeItem(p, it)
+	}
+	p.WriteByte(0)
+
+	// --- ITEMSLOTETC ---
+	for _, it := range etcInv {
+		p.WriteByte(byte(it.Slot))
+		encodeItem(p, it)
+	}
+	p.WriteByte(0)
+
+	// --- ITEMSLOTCASH (cash inventory, not cash equipped) ---
+	for _, it := range cashInv {
+		p.WriteByte(byte(it.Slot))
+		encodeItem(p, it)
+	}
+	p.WriteByte(0)
+}
+
+func encodeItem(p *protocol.Packet, it *models.CharacterItem) {
+	// nType
+	itemType := utils.GetItemTypeByItemID(it.ItemID)
+	p.WriteByte(byte(itemType))
+
+	// GW_ItemSlotBase::RawDecode
+	p.WriteInt(it.ItemID)
+
+	isCash := it.Cash // add this field to your model, or infer it
+	if isCash {
+		p.WriteByte(1)
+		p.WriteLong(uint64(it.ItemSN)) // add ItemSN if you support cash items
+	} else {
+		p.WriteByte(0)
+	}
+
+	// dateExpire (FT)
+	writeFT(p, it.ExpireAt) // must match OutPacket.encodeFT
+
+	switch itemType {
+	case utils.ItemTypeEquip:
+		encodeEquipData(p, it)
+	case utils.ItemTypePet:
+		encodePetData(p, it)
+	default:
+		// GW_ItemSlotBundle::RawDecode
+		p.WriteShort(uint16(it.Quantity))
+		// nTitle
+		p.WriteString(it.Owner)
+		// attribute
+		p.WriteShort(uint16(it.Attribute))
+
+		if utils.IsRechargeableItem(it.ItemID) {
+			p.WriteLong(uint64(it.ItemSN))
+		}
+	}
+}
+
+func encodeEquipData(p *protocol.Packet, it *models.CharacterItem) {
+	// nRUC / nCUC
+	p.WriteByte(it.RUC)
+	p.WriteByte(it.CUC)
+
+	// iSTR...iJump
+	p.WriteShort(uint16(it.IncStr))
+	p.WriteShort(uint16(it.IncDex))
+	p.WriteShort(uint16(it.IncInt))
+	p.WriteShort(uint16(it.IncLuk))
+	p.WriteShort(uint16(it.IncMaxHP))
+	p.WriteShort(uint16(it.IncMaxMP))
+	p.WriteShort(uint16(it.IncPAD))
+	p.WriteShort(uint16(it.IncMAD))
+	p.WriteShort(uint16(it.IncPDD))
+	p.WriteShort(uint16(it.IncMDD))
+	p.WriteShort(uint16(it.IncACC))
+	p.WriteShort(uint16(it.IncEVA))
+	p.WriteShort(uint16(it.IncCraft))
+	p.WriteShort(uint16(it.IncSpeed))
+	p.WriteShort(uint16(it.IncJump))
+
+	// sTitle (from Item)
+	p.WriteString(it.Owner)
+
+	// nAttribute (from Item)
+	p.WriteShort(uint16(it.Attribute))
+
+	// nLevelUpType, nLevel, nEXP, nDurability
+	p.WriteByte(it.LevelUpType)
+	p.WriteByte(it.Level)
+	p.WriteInt(it.Exp)
+	p.WriteInt(it.Durability)
+
+	// nIUC, nGrade, nCHUC
+	p.WriteInt(it.IUC)
+	p.WriteByte(it.Grade)
+	p.WriteByte(it.CHUC)
+
+	// nOption1..nSocket2
+	p.WriteShort(uint16(it.Option1))
+	p.WriteShort(uint16(it.Option2))
+	p.WriteShort(uint16(it.Option3))
+	p.WriteShort(uint16(it.Socket1))
+	p.WriteShort(uint16(it.Socket2))
+
+	// if (!cash) encodeLong(liSN)
+	if !it.Cash {
+		p.WriteLong(uint64(it.ItemSN))
+	}
+
+	// ftEquipped = ZERO_TIME
+	writeFTZero(p)
+
+	// nPrevBonusExpRate
+	p.WriteInt(0)
+}
+
+func encodePetData(p *protocol.Packet, it *models.CharacterItem) {
+	// encodeString(name, 13)
+	p.WriteStringWithLength(it.PetName, 13)
+
+	// nLevel
+	p.WriteByte(it.PetLevel)
+
+	// nTameness
+	p.WriteShort(uint16(it.PetTameness))
+
+	// nRepleteness
+	p.WriteByte(it.PetFullness)
+
+	// dateDead = item.getDateExpire()
+	writeFT(p, it.ExpireAt)
+
+	// nPetAttribute
+	p.WriteShort(uint16(it.PetAttribute))
+
+	// usPetSkill
+	p.WriteShort(uint16(it.PetSkill))
+
+	// nRemainLife
+	p.WriteInt(it.RemainLife)
+
+	// nAttribute (from base item)
+	p.WriteShort(uint16(it.Attribute))
+}
+
+var filetimeEpoch = time.Date(1601, 1, 1, 0, 0, 0, 0, time.UTC)
+
+func writeFTZero(p *protocol.Packet) {
+	p.WriteInt(0) // low
+	p.WriteInt(0) // high
+}
+
+func writeFT(p *protocol.Packet, ts *time.Time) {
+	if ts == nil || ts.IsZero() {
+		p.WriteInt(0) // low
+		p.WriteInt(0) // high
 		return
 	}
-	// Convert Unix time to Windows FILETIME
-	// FILETIME epoch is January 1, 1601
-	// Unix epoch is January 1, 1970
-	// Difference is 116444736000000000 (100-nanosecond intervals)
-	const unixToFileTime = 116444736000000000
-	ft := uint64(t.UnixNano()/100) + unixToFileTime
-	p.WriteLong(ft)
+
+	t := ts.UTC()
+	if t.Before(filetimeEpoch) {
+		p.WriteInt(0)
+		p.WriteInt(0)
+		return
+	}
+
+	d := t.Sub(filetimeEpoch)
+	ft := uint64(d.Nanoseconds() / 100)
+
+	low := uint32(ft & 0xFFFFFFFF)
+	high := uint32(ft >> 32)
+
+	p.WriteInt(int32(low))
+	p.WriteInt(int32(high))
 }

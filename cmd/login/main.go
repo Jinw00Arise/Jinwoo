@@ -10,8 +10,10 @@ import (
 
 	"github.com/Jinw00Arise/Jinwoo/internal/crypto"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/db"
+	"github.com/Jinw00Arise/Jinwoo/internal/data/providers"
+	"github.com/Jinw00Arise/Jinwoo/internal/data/providers/wz"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/repositories"
-	login2 "github.com/Jinw00Arise/Jinwoo/internal/game/login"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/login"
 )
 
 const shutdownTimeout = 30 * time.Second
@@ -23,7 +25,7 @@ func main() {
 		log.Fatalf("crypto.Init() failed: %v", err)
 	}
 
-	cfg := login2.LoadLogin()
+	cfg := login.LoadLogin()
 
 	dbConn, err := db.Connect(cfg.DatabaseURL)
 	if err != nil {
@@ -35,7 +37,14 @@ func main() {
 	charRepo := repositories.NewCharacterRepo(dbConn)
 	itemRepo := repositories.NewItemRepo(dbConn)
 
-	srv := login2.NewServer(cfg, accRepo, charRepo, itemRepo)
+	// Initialize WZ providers
+	wzProvider := wz.NewWzProvider(cfg.WZPath)
+	itemProvider, err := providers.NewItemProvider(wzProvider)
+	if err != nil {
+		log.Fatalf("Failed to initialize item provider: %v", err)
+	}
+
+	srv := login.NewServer(cfg, accRepo, charRepo, itemRepo, itemProvider)
 
 	// Start server
 	serverErr := make(chan error, 1)

@@ -5,30 +5,33 @@ import (
 	"log"
 	"net"
 
+	"github.com/Jinw00Arise/Jinwoo/internal/data/providers"
 	"github.com/Jinw00Arise/Jinwoo/internal/interfaces"
 	"github.com/Jinw00Arise/Jinwoo/internal/network"
 )
 
 type Server struct {
-	config     *LoginConfig
-	accounts   interfaces.AccountRepo
-	characters interfaces.CharacterRepo
-	items      interfaces.ItemsRepo
+	config       *LoginConfig
+	accounts     interfaces.AccountRepo
+	characters   interfaces.CharacterRepo
+	items        interfaces.ItemsRepo
+	itemProvider *providers.ItemProvider
 
 	listener net.Listener
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
 
-func NewServer(cfg *LoginConfig, accs interfaces.AccountRepo, chars interfaces.CharacterRepo, items interfaces.ItemsRepo) *Server {
+func NewServer(cfg *LoginConfig, accs interfaces.AccountRepo, chars interfaces.CharacterRepo, items interfaces.ItemsRepo, itemProv *providers.ItemProvider) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
-		config:     cfg,
-		accounts:   accs,
-		characters: chars,
-		items:      items,
-		ctx:        ctx,
-		cancel:     cancel,
+		config:       cfg,
+		accounts:     accs,
+		characters:   chars,
+		items:        items,
+		itemProvider: itemProv,
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 }
 
@@ -90,7 +93,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	handler := NewHandler(ctx, c, s.config, s.accounts, s.characters, s.items)
+	handler := NewHandler(ctx, c, s.config, s.accounts, s.characters, s.items, s.itemProvider)
 
 	for {
 		p, err := c.Read()

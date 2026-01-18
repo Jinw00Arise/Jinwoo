@@ -13,6 +13,7 @@ import (
 type Server struct {
 	config     *ChannelConfig
 	characters interfaces.CharacterRepo
+	items      interfaces.ItemsRepo
 	fields     *field.Manager
 
 	listener net.Listener
@@ -20,11 +21,12 @@ type Server struct {
 	cancel   context.CancelFunc
 }
 
-func NewServer(cfg *ChannelConfig, chars interfaces.CharacterRepo, fieldMgr *field.Manager) *Server {
+func NewServer(cfg *ChannelConfig, chars interfaces.CharacterRepo, items interfaces.ItemsRepo, fieldMgr *field.Manager) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		config:     cfg,
 		characters: chars,
+		items:      items,
 		fields:     fieldMgr,
 		ctx:        ctx,
 		cancel:     cancel,
@@ -89,7 +91,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	handler := NewHandler(ctx, c, s.config, s.characters, s.fields)
+	handler := NewHandler(ctx, c, s.config, s.characters, s.items, s.fields)
 
 	for {
 		p, err := c.Read()
