@@ -16,6 +16,10 @@ type Field struct {
 	users        *UserManager
 	mu           sync.RWMutex
 
+	portalsByName map[string]providers.Portal
+	portalsByID   map[byte]providers.Portal
+	portals       []providers.Portal
+
 	stop      chan struct{}
 	startOnce sync.Once
 	closeOnce sync.Once
@@ -27,10 +31,19 @@ func NewField(mapData *providers.MapData) *Field {
 	}
 
 	f := &Field{
-		mapData:      mapData,
-		nextObjectID: 1000,
-		users:        NewUserManager(),
-		stop:         make(chan struct{}),
+		mapData:       mapData,
+		nextObjectID:  1000,
+		users:         NewUserManager(),
+		stop:          make(chan struct{}),
+		portalsByName: make(map[string]providers.Portal),
+		portalsByID:   make(map[byte]providers.Portal),
+		portals:       make([]providers.Portal, 0, len(mapData.Portals)),
+	}
+
+	for name, p := range mapData.Portals {
+		f.portalsByName[name] = p
+		f.portalsByID[p.ID] = p
+		f.portals = append(f.portals, p)
 	}
 
 	f.Start()
@@ -100,13 +113,21 @@ func (f *Field) SpawnPoint() (x, y int16) {
 
 // GetPortal returns a portal by name
 func (f *Field) GetPortal(name string) (providers.Portal, bool) {
-	portal, exists := f.mapData.Portals[name]
-	return portal, exists
+	p, ok := f.portalsByName[name]
+	return p, ok
 }
 
-// GetPortals returns all portals in this field
-func (f *Field) GetPortals() map[string]providers.Portal {
-	return f.mapData.Portals
+// GetPortalByID returns a portal by its numeric id
+func (f *Field) GetPortalByID(id byte) (providers.Portal, bool) {
+	p, ok := f.portalsByID[id]
+	return p, ok
+}
+
+// Portals returns a copy slice of portals
+func (f *Field) Portals() []providers.Portal {
+	out := make([]providers.Portal, len(f.portals))
+	copy(out, f.portals)
+	return out
 }
 
 // AddUser adds a user to this field.

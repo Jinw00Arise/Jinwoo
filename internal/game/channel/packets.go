@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/Jinw00Arise/Jinwoo/internal/database/models"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/field"
 	"github.com/Jinw00Arise/Jinwoo/internal/protocol"
 	"github.com/Jinw00Arise/Jinwoo/internal/utils"
 )
 
-func SetField(char *models.Character, channelID int, fieldKey byte, items []*models.CharacterItem) protocol.Packet {
+func SetField(char *models.Character, channelID int, fieldKey byte, items []*models.CharacterItem, skills []*models.Skill, cooldowns []*models.SkillCooldown, quests []*models.QuestRecord) protocol.Packet {
 	p := protocol.NewWithOpcode(SendSetField)
 
 	// SetField header
@@ -30,7 +31,7 @@ func SetField(char *models.Character, channelID int, fieldKey byte, items []*mod
 	p.WriteInt(s3)
 
 	// CharacterData::Decode
-	writeCharacterDataFull(&p, char, items)
+	writeCharacterDataFull(&p, char, items, skills, cooldowns, quests)
 
 	// CWvsContext::OnSetLogoutGiftConfig
 	p.WriteInt(0) // bPredictQuit
@@ -45,7 +46,7 @@ func SetField(char *models.Character, channelID int, fieldKey byte, items []*mod
 	return p
 }
 
-func writeCharacterDataFull(p *protocol.Packet, char *models.Character, items []*models.CharacterItem) {
+func writeCharacterDataFull(p *protocol.Packet, char *models.Character, items []*models.CharacterItem, skills []*models.Skill, cooldowns []*models.SkillCooldown, quests []*models.QuestRecord) {
 	// DBChar flag - ALL = -1 (0xFFFFFFFFFFFFFFFF as unsigned)
 	p.WriteLong(0xFFFFFFFFFFFFFFFF) // TODO: Support multiple flags
 	p.WriteByte(0)                  // nCombatOrders
@@ -72,16 +73,55 @@ func writeCharacterDataFull(p *protocol.Packet, char *models.Character, items []
 	writeInventoryBlocks(p, items)
 
 	// SKILLRECORD flag
-	p.WriteShort(0) // No skills
+	p.WriteShort(uint16(len(skills)))
+	for _, skill := range skills {
+		p.WriteInt(skill.SkillID)
+		p.WriteInt(int32(skill.Level))
+		writeFT(p, nil) // dateExpire
+		if isSkillNeedMasterLevel(skill.SkillID) {
+			p.WriteInt(int32(skill.MasterLevel))
+		}
+	}
 
 	// SKILLCOOLTIME flag
-	p.WriteShort(0) // No cooldowns
+	p.WriteShort(uint16(len(cooldowns)))
+	now := time.Now()
+	for _, cd := range cooldowns {
+		p.WriteInt(cd.SkillID)
+		remaining := cd.ExpiresAt.Sub(now)
+		if remaining < 0 {
+			remaining = 0
+		}
+		p.WriteShort(uint16(remaining.Seconds()))
+	}
 
 	// QUESTRECORD flag (started quests)
-	p.WriteShort(0)
+	var startedQuests []*models.QuestRecord
+	var completedQuests []*models.QuestRecord
+	for _, q := range quests {
+		if q.State == byte(models.QuestStatePerform) {
+			startedQuests = append(startedQuests, q)
+		} else if q.State == byte(models.QuestStateComplete) {
+			completedQuests = append(completedQuests, q)
+		}
+	}
+
+	p.WriteShort(uint16(len(startedQuests)))
+	for _, q := range startedQuests {
+		p.WriteShort(q.QuestID)
+		p.WriteString(q.Progress)
+	}
 
 	// QUESTCOMPLETE flag (completed quests)
-	p.WriteShort(0)
+	p.WriteShort(uint16(len(completedQuests)))
+	for _, q := range completedQuests {
+		p.WriteShort(q.QuestID)
+		if q.CompletedAt != nil {
+			writeFT(p, q.CompletedAt)
+		} else {
+			writeFT(p, nil)
+		}
+	}
 
 	// MINIGAMERECORD flag - 2 records (omok and memory game)
 	p.WriteShort(2)
@@ -401,4 +441,103 @@ func writeFT(p *protocol.Packet, ts *time.Time) {
 
 	p.WriteInt(int32(low))
 	p.WriteInt(int32(high))
+}
+
+func UserMove(characterID uint, movePath *field.MovePath) protocol.Packet {
+	p := protocol.NewWithOpcode(SendUserMove)
+	p.WriteInt(int32(characterID))
+	movePath.Encode(&p)
+	return p
+}
+
+// isSkillNeedMasterLevel returns true if the skill requires master level to be encoded
+func isSkillNeedMasterLevel(skillID int32) bool {
+	// 4th job skills and certain special skills need master level
+	// Skills in job range 2xx1 and above (4th job) need master level
+	jobID := skillID / 10000
+	return jobID%10 == 2 || // 4th job advancement skills
+		(skillID >= 1120000 && skillID < 1130000) || // Hero
+		(skillID >= 1220000 && skillID < 1230000) || // Paladin
+		(skillID >= 1320000 && skillID < 1330000) || // Dark Knight
+		(skillID >= 2120000 && skillID < 2130000) || // Arch Mage F/P
+		(skillID >= 2220000 && skillID < 2230000) || // Arch Mage I/L
+		(skillID >= 2320000 && skillID < 2330000) || // Bishop
+		(skillID >= 3120000 && skillID < 3130000) || // Bowmaster
+		(skillID >= 3220000 && skillID < 3230000) || // Marksman
+		(skillID >= 4120000 && skillID < 4130000) || // Night Lord
+		(skillID >= 4220000 && skillID < 4230000) || // Shadower
+		(skillID >= 5120000 && skillID < 5130000) || // Buccaneer
+		(skillID >= 5220000 && skillID < 5230000) // Corsair
+}
+
+// FuncKeyMappedInit encodes the key bindings packet
+func FuncKeyMappedInit(bindings []*models.KeyBinding) protocol.Packet {
+	p := protocol.NewWithOpcode(SendFuncKeyMappedInit)
+
+	if len(bindings) == 0 {
+		// bDefault = true, client uses default keybindings
+		p.WriteBool(true)
+	} else {
+		p.WriteBool(false)
+		// Write 89 key slots (0-88)
+		bindingMap := make(map[int32]*models.KeyBinding)
+		for _, b := range bindings {
+			bindingMap[b.KeyID] = b
+		}
+
+		for i := int32(0); i < 89; i++ {
+			if b, ok := bindingMap[i]; ok {
+				p.WriteByte(b.Type)
+				p.WriteInt(b.Action)
+			} else {
+				p.WriteByte(0)
+				p.WriteInt(0)
+			}
+		}
+	}
+
+	return p
+}
+
+// QuickslotMappedInit encodes the quickslot bindings packet
+func QuickslotMappedInit(slots []*models.QuickSlot) protocol.Packet {
+	p := protocol.NewWithOpcode(SendQuickslotMappedInit)
+
+	if len(slots) == 0 {
+		// bDefault = true, client uses default quickslots
+		p.WriteBool(true)
+	} else {
+		p.WriteBool(false)
+		// Write 8 quickslot keys
+		slotMap := make(map[byte]int32)
+		for _, s := range slots {
+			slotMap[s.Slot] = s.KeyID
+		}
+
+		for i := byte(0); i < 8; i++ {
+			if keyID, ok := slotMap[i]; ok {
+				p.WriteInt(keyID)
+			} else {
+				p.WriteInt(0)
+			}
+		}
+	}
+
+	return p
+}
+
+// MacroSysDataInit encodes the skill macros packet
+func MacroSysDataInit(macros []*models.SkillMacro) protocol.Packet {
+	p := protocol.NewWithOpcode(SendMacroSysDataInit)
+
+	p.WriteByte(byte(len(macros)))
+	for _, m := range macros {
+		p.WriteString(m.Name)
+		p.WriteBool(m.Shout)
+		p.WriteInt(m.Skill1)
+		p.WriteInt(m.Skill2)
+		p.WriteInt(m.Skill3)
+	}
+
+	return p
 }

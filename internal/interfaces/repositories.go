@@ -8,6 +8,7 @@ import (
 
 type AccountRepo interface {
 	FindByUsername(ctx context.Context, username string) (*models.Account, error)
+	FindByID(ctx context.Context, id uint) (*models.Account, error)
 	Create(ctx context.Context, username, password string) (*models.Account, error)
 	VerifyPassword(account *models.Account, password string) bool
 }
@@ -29,4 +30,21 @@ type ItemsRepo interface {
 	GetEquippedByCharacterID(ctx context.Context, characterID uint) ([]*models.CharacterItem, error)
 	GetEquippedByCharacterIDs(ctx context.Context, characterIDs []uint) (map[uint][]*models.CharacterItem, error)
 	GetByCharacterID(ctx context.Context, characterID uint) ([]*models.CharacterItem, error)
+}
+
+type SkillRepo interface {
+	GetByCharacterID(ctx context.Context, characterID uint) ([]*models.Skill, error)
+	GetCooldowns(ctx context.Context, characterID uint) ([]*models.SkillCooldown, error)
+}
+
+type KeyBindingRepo interface {
+	GetByCharacterID(ctx context.Context, characterID uint) ([]*models.KeyBinding, error)
+}
+
+type QuickSlotRepo interface {
+	GetByCharacterID(ctx context.Context, characterID uint) ([]*models.QuickSlot, error)
+}
+
+type SkillMacroRepo interface {
+	GetByCharacterID(ctx context.Context, characterID uint) ([]*models.SkillMacro, error)
 }

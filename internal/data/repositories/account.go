@@ -33,6 +33,17 @@ func (r *accountRepo) FindByUsername(ctx context.Context, username string) (*mod
 	return &account, nil
 }
 
+func (r *accountRepo) FindByID(ctx context.Context, id uint) (*models.Account, error) {
+	var account models.Account
+	if err := r.db.WithContext(ctx).First(&account, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrAccountNotFound
+		}
+		return nil, err
+	}
+	return &account, nil
+}
+
 func (r *accountRepo) Create(ctx context.Context, username, password string) (*models.Account, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {

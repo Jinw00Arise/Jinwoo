@@ -13,12 +13,16 @@ type User struct {
 	conn      *network.Connection
 	character *models.Character
 	items     []*models.CharacterItem
+	skills    []*models.Skill
+	cooldowns []*models.SkillCooldown
 
 	// Current field and position
-	field    *Field
-	fieldKey byte
-	posX     int16
-	posY     int16
+	field      *Field
+	fieldKey   byte
+	posX       int16
+	posY       int16
+	foothold   int16
+	moveAction byte
 
 	mu sync.RWMutex
 }
@@ -98,6 +102,48 @@ func (u *User) SetPosition(x, y int16) {
 	defer u.mu.Unlock()
 	u.posX = x
 	u.posY = y
+}
+
+// SetX sets the user's X position (implements Life interface)
+func (u *User) SetX(x int16) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.posX = x
+}
+
+// SetY sets the user's Y position (implements Life interface)
+func (u *User) SetY(y int16) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.posY = y
+}
+
+// Foothold returns the user's current foothold
+func (u *User) Foothold() int16 {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.foothold
+}
+
+// SetFoothold sets the user's foothold (implements Life interface)
+func (u *User) SetFoothold(fh int16) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.foothold = fh
+}
+
+// MoveAction returns the user's current move action
+func (u *User) MoveAction() byte {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.moveAction
+}
+
+// SetMoveAction sets the user's move action (implements Life interface)
+func (u *User) SetMoveAction(action byte) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.moveAction = action
 }
 
 // MapID returns the character's current map ID
@@ -214,4 +260,32 @@ func (u *User) Items() []*models.CharacterItem {
 	defer u.mu.Unlock()
 
 	return u.items
+}
+
+func (u *User) SetSkills(skills []*models.Skill) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	u.skills = skills
+}
+
+func (u *User) Skills() []*models.Skill {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+
+	return u.skills
+}
+
+func (u *User) SetCooldowns(cooldowns []*models.SkillCooldown) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	u.cooldowns = cooldowns
+}
+
+func (u *User) Cooldowns() []*models.SkillCooldown {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+
+	return u.cooldowns
 }

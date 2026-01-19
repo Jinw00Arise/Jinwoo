@@ -61,3 +61,7 @@ var SendOpcodeNames = map[uint16]string{
 	SendDeleteCharacterResult:    "DeleteCharacterResult",
 	SendLatestConnectedWorld:     "SendLatestConnectedWorld",
 }
+
+var IgnoredRecvOpcodes = map[uint16]struct{}{}
+
+var IgnoredSendOpcodes = map[uint16]struct{}{}

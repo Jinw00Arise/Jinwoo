@@ -51,6 +51,12 @@ func main() {
 
 	charRepo := repositories.NewCharacterRepo(dbConn)
 	itemRepo := repositories.NewItemRepo(dbConn)
+	accountRepo := repositories.NewAccountRepository(dbConn)
+	skillRepo := repositories.NewSkillRepo(dbConn)
+	keyBindingRepo := repositories.NewKeyBindingRepo(dbConn)
+	quickSlotRepo := repositories.NewQuickSlotRepo(dbConn)
+	skillMacroRepo := repositories.NewSkillMacroRepo(dbConn)
+	questRepo := repositories.NewQuestProgressRepo(dbConn)
 
 	// Initialize WZ data providers
 	log.Printf("[Channel] Loading WZ data from: %s", cfg.WZPath)
@@ -61,7 +67,8 @@ func main() {
 	fieldMgr := field.NewManager(mapProvider)
 	log.Println("[Channel] Field manager initialized")
 
-	srv := channel.NewServer(cfg, charRepo, itemRepo, fieldMgr)
+	srv := channel.NewServer(cfg, charRepo, itemRepo, fieldMgr,
+		accountRepo, skillRepo, keyBindingRepo, quickSlotRepo, skillMacroRepo, questRepo)
 
 	// Start server
 	serverErr := make(chan error, 1)

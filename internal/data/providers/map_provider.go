@@ -17,6 +17,7 @@ type MapData struct {
 }
 
 type Portal struct {
+	ID   byte
 	Name string
 	Type int32
 	X    int16
@@ -124,6 +125,10 @@ func (p *MapProvider) parseMapData(mapID int32, root *wz.ImgDir) (*MapData, erro
 
 func (p *MapProvider) parsePortal(portalDir *wz.ImgDir) (Portal, error) {
 	portal := Portal{}
+
+	if idx, err := strconv.Atoi(portalDir.Name); err == nil && idx >= 0 && idx <= 255 {
+		portal.ID = byte(idx)
+	}
 
 	pn, err := portalDir.GetString("pn")
 	if err != nil {
