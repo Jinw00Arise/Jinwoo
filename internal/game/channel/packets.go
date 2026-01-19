@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Jinw00Arise/Jinwoo/internal/database/models"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/field"
 	"github.com/Jinw00Arise/Jinwoo/internal/protocol"
 	"github.com/Jinw00Arise/Jinwoo/internal/utils"
 )
@@ -401,4 +402,11 @@ func writeFT(p *protocol.Packet, ts *time.Time) {
 
 	p.WriteInt(int32(low))
 	p.WriteInt(int32(high))
+}
+
+func UserMove(characterID uint, movePath *field.MovePath) protocol.Packet {
+	p := protocol.NewWithOpcode(SendUserMove)
+	p.WriteInt(int32(characterID))
+	movePath.Encode(&p)
+	return p
 }

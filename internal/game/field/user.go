@@ -15,10 +15,12 @@ type User struct {
 	items     []*models.CharacterItem
 
 	// Current field and position
-	field    *Field
-	fieldKey byte
-	posX     int16
-	posY     int16
+	field      *Field
+	fieldKey   byte
+	posX       int16
+	posY       int16
+	foothold   int16
+	moveAction byte
 
 	mu sync.RWMutex
 }
@@ -210,8 +212,53 @@ func (u *User) SetItems(items []*models.CharacterItem) {
 }
 
 func (u *User) Items() []*models.CharacterItem {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+
+	// Return a copy to prevent race conditions when caller iterates
+	// while another goroutine calls SetItems
+	cpy := make([]*models.CharacterItem, len(u.items))
+	copy(cpy, u.items)
+	return cpy
+}
+
+func (u *User) SetX(x int16) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	u.posX = x
+}
 
-	return u.items
+// SetY sets the user's Y position (implements Life interface)
+func (u *User) SetY(y int16) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.posY = y
+}
+
+// Foothold returns the user's current foothold
+func (u *User) Foothold() int16 {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.foothold
+}
+
+// SetFoothold sets the user's foothold (implements Life interface)
+func (u *User) SetFoothold(fh int16) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.foothold = fh
+}
+
+// MoveAction returns the user's current move action
+func (u *User) MoveAction() byte {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.moveAction
+}
+
+// SetMoveAction sets the user's move action (implements Life interface)
+func (u *User) SetMoveAction(action byte) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.moveAction = action
 }

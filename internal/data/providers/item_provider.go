@@ -46,6 +46,10 @@ func NewItemProvider(wzProvider *wz.WzProvider) (*ItemProvider, error) {
 		return nil, err
 	}
 
+	if err := p.loadEquipInfos(); err != nil {
+		return nil, err
+	}
+
 	if err := p.loadItemNames(); err != nil {
 		return nil, err
 	}
@@ -149,6 +153,42 @@ func (p *ItemProvider) loadItemInfos() error {
 
 		if len(actions) > 0 {
 			p.petActions[id] = actions
+		}
+	}
+
+	return nil
+}
+
+func (p *ItemProvider) loadEquipInfos() error {
+	// Equipment items are stored in Character.wz/{Type}/{itemID}.img
+	charDir := p.wz.Dir("Character.wz")
+
+	for _, equipType := range EquipTypes {
+		equipTypeDir := charDir.Dir(equipType)
+		equipImages, err := equipTypeDir.GetAllImages()
+		if err != nil {
+			// Some equip types might not exist, skip them
+			continue
+		}
+
+		for _, imgName := range equipImages.Order {
+			img := equipImages.Items[imgName]
+
+			// Equipment image name is the item ID (e.g., "01040010")
+			itemID, err := strconv.ParseInt(imgName, 10, 32)
+			if err != nil {
+				continue
+			}
+
+			id := int32(itemID)
+			root := img.Root()
+			if root == nil {
+				continue
+			}
+
+			// Get info directory from root
+			infoDir := root.Get("info")
+			p.itemInfos[id] = item.NewItemInfo(id, infoDir, nil)
 		}
 	}
 

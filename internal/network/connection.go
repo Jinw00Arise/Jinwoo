@@ -23,8 +23,10 @@ type Connection struct {
 	recvIV []byte
 
 	// Optional opcode name maps for debug logging
-	recvOpcodeNames map[uint16]string
-	sendOpcodeNames map[uint16]string
+	recvOpcodeNames    map[uint16]string
+	sendOpcodeNames    map[uint16]string
+	ignoredRecvOpcodes map[uint16]struct{}
+	ignoredSendOpcodes map[uint16]struct{}
 }
 
 func NewConnection(conn net.Conn) *Connection {
@@ -41,9 +43,11 @@ func (c *Connection) SendIV() []byte     { return c.sendIV }
 func (c *Connection) RecvIV() []byte     { return c.recvIV }
 
 // SetOpcodeNames sets the opcode name maps for debug logging
-func (c *Connection) SetOpcodeNames(recvNames, sendNames map[uint16]string) {
+func (c *Connection) SetOpcodeNames(recvNames, sendNames map[uint16]string, ignoredRecvOpcodes map[uint16]struct{}, ignoredSendOpcodes map[uint16]struct{}) {
 	c.recvOpcodeNames = recvNames
 	c.sendOpcodeNames = sendNames
+	c.ignoredRecvOpcodes = ignoredRecvOpcodes
+	c.ignoredSendOpcodes = ignoredSendOpcodes
 }
 
 func (c *Connection) WriteRaw(data []byte) error {
@@ -54,6 +58,7 @@ func (c *Connection) WriteRaw(data []byte) error {
 func (c *Connection) Write(p protocol.Packet) error {
 	if len(p) >= 2 {
 		opcode := uint16(p[0]) | uint16(p[1])<<8
+
 		opcodeName := ""
 		if c.sendOpcodeNames != nil {
 			if name, ok := c.sendOpcodeNames[opcode]; ok {
@@ -114,6 +119,11 @@ func (c *Connection) Read() (protocol.Packet, error) {
 
 	if len(data) >= 2 {
 		opcode := uint16(data[0]) | uint16(data[1])<<8
+
+		if _, ignored := c.ignoredRecvOpcodes[opcode]; ignored {
+			return data, nil
+		}
+
 		opcodeName := ""
 		if c.recvOpcodeNames != nil {
 			if name, ok := c.recvOpcodeNames[opcode]; ok {
@@ -123,7 +133,7 @@ func (c *Connection) Read() (protocol.Packet, error) {
 		log.Printf("[RECV] 0x%04X%s data=%X", opcode, opcodeName, data)
 	}
 
-	return protocol.Packet(data), nil
+	return data, nil
 }
 
 func (c *Connection) SendHandshake(gameVersion uint16, patchVersion string, locale byte) error {

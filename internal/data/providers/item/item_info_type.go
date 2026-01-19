@@ -1,6 +1,10 @@
 package item
 
-import "github.com/Jinw00Arise/Jinwoo/internal/data/providers/wz"
+import (
+	"fmt"
+
+	"github.com/Jinw00Arise/Jinwoo/internal/data/providers/wz"
+)
 
 type ItemValueKind uint8
 
@@ -301,48 +305,48 @@ func (io ItemInfos) Get(key ItemInfosKey) (ItemValue, bool) {
 	return v, ok
 }
 
-func (io ItemInfos) GetInt(key ItemInfosKey) int32 {
+func (io ItemInfos) GetInt(key ItemInfosKey) (int32, error) {
 	v, ok := io[key]
 	if !ok {
-		panic("missing item info key: " + string(key))
+		return 0, fmt.Errorf("missing item info key: %s", key)
 	}
 	if v.Kind != ValueInt {
-		panic("item info key is not int: " + string(key))
+		return 0, fmt.Errorf("item info key %s is not int (got %d)", key, v.Kind)
 	}
-	return v.Int
+	return v.Int, nil
 }
 
-func (io ItemInfos) GetBool(key ItemInfosKey) bool {
+func (io ItemInfos) GetBool(key ItemInfosKey) (bool, error) {
 	v, ok := io[key]
 	if !ok {
-		panic("missing item info key: " + string(key))
+		return false, fmt.Errorf("missing item info key: %s", key)
 	}
 	if v.Kind != ValueBool {
-		panic("item info key is not bool: " + string(key))
+		return false, fmt.Errorf("item info key %s is not bool (got %d)", key, v.Kind)
 	}
-	return v.Bool
+	return v.Bool, nil
 }
 
-func (io ItemInfos) GetString(key ItemInfosKey) string {
+func (io ItemInfos) GetString(key ItemInfosKey) (string, error) {
 	v, ok := io[key]
 	if !ok {
-		panic("missing item info key: " + string(key))
+		return "", fmt.Errorf("missing item info key: %s", key)
 	}
 	if v.Kind != ValueString {
-		panic("item info key is not string: " + string(key))
+		return "", fmt.Errorf("item info key %s is not string (got %d)", key, v.Kind)
 	}
-	return v.String
+	return v.String, nil
 }
 
-func (io ItemInfos) GetDir(key ItemInfosKey) *wz.ImgDir {
+func (io ItemInfos) GetDir(key ItemInfosKey) (*wz.ImgDir, error) {
 	v, ok := io[key]
 	if !ok {
-		panic("missing item info key: " + string(key))
+		return nil, fmt.Errorf("missing item info key: %s", key)
 	}
 	if v.Kind != ValueDir {
-		panic("item info key is not dir: " + string(key))
+		return nil, fmt.Errorf("item info key %s is not dir (got %d)", key, v.Kind)
 	}
-	return v.Dir
+	return v.Dir, nil
 }
 
 func (io ItemInfos) Has(key ItemInfosKey) bool {

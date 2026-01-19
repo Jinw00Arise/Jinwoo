@@ -53,3 +53,14 @@ func (r *accountRepo) VerifyPassword(account *models.Account, password string) b
 	err := bcrypt.CompareHashAndPassword([]byte(account.PasswordHash), []byte(password))
 	return err == nil
 }
+
+func (r *accountRepo) FindByID(ctx context.Context, id uint) (*models.Account, error) {
+	var account models.Account
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&account).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrAccountNotFound
+		}
+		return nil, err
+	}
+	return &account, nil
+}

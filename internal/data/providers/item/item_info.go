@@ -38,8 +38,8 @@ func (i *ItemInfo) GetItemSpecs() ItemSpecs {
 	return i.itemSpecs
 }
 
-// GetInfo returns the int value for an info key, panics if missing.
-func (i *ItemInfo) GetInfo(key ItemInfosKey) int32 {
+// GetInfo returns the int value for an info key, or an error if missing/wrong type.
+func (i *ItemInfo) GetInfo(key ItemInfosKey) (int32, error) {
 	return i.itemInfos.GetInt(key)
 }
 
@@ -51,8 +51,8 @@ func (i *ItemInfo) GetInfoOr(key ItemInfosKey, defaultValue int32) int32 {
 	return defaultValue
 }
 
-// GetSpec returns the int value for a spec key, panics if missing.
-func (i *ItemInfo) GetSpec(key ItemSpecsKey) int32 {
+// GetSpec returns the int value for a spec key, or an error if missing/wrong type.
+func (i *ItemInfo) GetSpec(key ItemSpecsKey) (int32, error) {
 	return i.itemSpecs.GetInt(key)
 }
 

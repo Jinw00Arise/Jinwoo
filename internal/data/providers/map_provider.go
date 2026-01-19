@@ -16,13 +16,42 @@ type MapData struct {
 	Footholds    []Foothold
 }
 
+// Portal type constants
+const (
+	PortalTypeStartPoint  int32 = 0 // Spawn point
+	PortalTypeVisible     int32 = 1 // Regular portal
+	PortalTypeHidden      int32 = 2 // Hidden portal (activated by proximity)
+	PortalTypeScripted    int32 = 3 // Script-triggered portal
+	PortalTypeAutomatic   int32 = 4 // Auto-trigger on contact
+	PortalTypeCollision   int32 = 6 // Collision-based portal
+	PortalTypeChangeable  int32 = 7 // Can change destination
+)
+
+// PortalInvalidTarget is the sentinel value for portals without a target map
+const PortalInvalidTarget int32 = 999999999
+
 type Portal struct {
 	Name string
 	Type int32
 	X    int16
 	Y    int16
-	TM   int32  // Target map
+	TM   int32  // Target map (PortalInvalidTarget if none)
 	TN   string // Target portal name
+}
+
+// HasTarget returns true if this portal has a valid target map
+func (p Portal) HasTarget() bool {
+	return p.TM != PortalInvalidTarget && p.TM != 0
+}
+
+// IsUsableByPlayer returns true if this portal type can be activated by player input
+func (p Portal) IsUsableByPlayer() bool {
+	switch p.Type {
+	case PortalTypeVisible, PortalTypeHidden, PortalTypeAutomatic:
+		return true
+	default:
+		return false
+	}
 }
 
 type Foothold struct {
@@ -150,6 +179,8 @@ func (p *MapProvider) parsePortal(portalDir *wz.ImgDir) (Portal, error) {
 	portal.Y = int16(y)
 
 	// tm and tn are optional (not all portals have targets)
+	// Use sentinel value for missing tm to prevent accidental teleport to map 0
+	portal.TM = PortalInvalidTarget
 	if tm, err := portalDir.GetInt("tm"); err == nil {
 		portal.TM = tm
 	}

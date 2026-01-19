@@ -309,6 +309,57 @@ func (h *Handler) handleCreateNewCharacter(reader *protocol.Reader) {
 		return
 	}
 
+	// CRITICAL: Validate all starter items against whitelist to prevent item injection
+	selectedRace := game.Race(race)
+	if !game.IsValidStarterItem(selectedRace, game.StarterSlotFace, selected.face) {
+		log.Printf("[Login] SECURITY: Invalid starter face %d for race %d", selected.face, race)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+		_ = h.conn.Close()
+		return
+	}
+	if !game.IsValidStarterItem(selectedRace, game.StarterSlotHair, selected.hair) {
+		log.Printf("[Login] SECURITY: Invalid starter hair %d for race %d", selected.hair, race)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+		_ = h.conn.Close()
+		return
+	}
+	if !game.IsValidHairColor(selected.hairColor) {
+		log.Printf("[Login] SECURITY: Invalid hair color %d", selected.hairColor)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+		_ = h.conn.Close()
+		return
+	}
+	if !game.IsValidSkinColor(selected.skin) {
+		log.Printf("[Login] SECURITY: Invalid skin color %d", selected.skin)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+		_ = h.conn.Close()
+		return
+	}
+	if !game.IsValidStarterItem(selectedRace, game.StarterSlotCoat, selected.coat) {
+		log.Printf("[Login] SECURITY: Invalid starter coat %d for race %d", selected.coat, race)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+		_ = h.conn.Close()
+		return
+	}
+	if !game.IsValidStarterItem(selectedRace, game.StarterSlotPants, selected.pants) {
+		log.Printf("[Login] SECURITY: Invalid starter pants %d for race %d", selected.pants, race)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+		_ = h.conn.Close()
+		return
+	}
+	if !game.IsValidStarterItem(selectedRace, game.StarterSlotShoes, selected.shoes) {
+		log.Printf("[Login] SECURITY: Invalid starter shoes %d for race %d", selected.shoes, race)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+		_ = h.conn.Close()
+		return
+	}
+	if !game.IsValidStarterItem(selectedRace, game.StarterSlotWeapon, selected.weapon) {
+		log.Printf("[Login] SECURITY: Invalid starter weapon %d for race %d", selected.weapon, race)
+		_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+		_ = h.conn.Close()
+		return
+	}
+
 	finalHair := selected.hair + selected.hairColor
 
 	char := &models.Character{
@@ -339,28 +390,44 @@ func (h *Handler) handleCreateNewCharacter(reader *protocol.Reader) {
 	}
 
 	// Build starting equipped items (InvEquipped + negative slots)
+	// Items have been validated against whitelist above, so missing WZ data is a server config error
 	equipped := make([]*models.CharacterItem, 0, 4)
 
-	// Only add if non-zero (in case client sends 0)
 	if selected.coat != 0 {
-		if coatInfo := h.itemProvider.GetItemInfo(selected.coat); coatInfo != nil {
-			equipped = append(equipped, utils.NewEquipFromItemInfo(coatInfo, models.InvEquipped, models.EquipSlotCoat))
+		coatInfo := h.itemProvider.GetItemInfo(selected.coat)
+		if coatInfo == nil {
+			log.Printf("[Login] ERROR: Whitelisted coat %d not found in WZ data", selected.coat)
+			_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+			return
 		}
+		equipped = append(equipped, utils.NewEquipFromItemInfo(coatInfo, models.InvEquipped, models.EquipSlotCoat))
 	}
 	if selected.pants != 0 {
-		if pantsInfo := h.itemProvider.GetItemInfo(selected.pants); pantsInfo != nil {
-			equipped = append(equipped, utils.NewEquipFromItemInfo(pantsInfo, models.InvEquipped, models.EquipSlotPants))
+		pantsInfo := h.itemProvider.GetItemInfo(selected.pants)
+		if pantsInfo == nil {
+			log.Printf("[Login] ERROR: Whitelisted pants %d not found in WZ data", selected.pants)
+			_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+			return
 		}
+		equipped = append(equipped, utils.NewEquipFromItemInfo(pantsInfo, models.InvEquipped, models.EquipSlotPants))
 	}
 	if selected.shoes != 0 {
-		if shoesInfo := h.itemProvider.GetItemInfo(selected.shoes); shoesInfo != nil {
-			equipped = append(equipped, utils.NewEquipFromItemInfo(shoesInfo, models.InvEquipped, models.EquipSlotShoes))
+		shoesInfo := h.itemProvider.GetItemInfo(selected.shoes)
+		if shoesInfo == nil {
+			log.Printf("[Login] ERROR: Whitelisted shoes %d not found in WZ data", selected.shoes)
+			_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+			return
 		}
+		equipped = append(equipped, utils.NewEquipFromItemInfo(shoesInfo, models.InvEquipped, models.EquipSlotShoes))
 	}
 	if selected.weapon != 0 {
-		if weaponInfo := h.itemProvider.GetItemInfo(selected.weapon); weaponInfo != nil {
-			equipped = append(equipped, utils.NewEquipFromItemInfo(weaponInfo, models.InvEquipped, models.EquipSlotWeapon))
+		weaponInfo := h.itemProvider.GetItemInfo(selected.weapon)
+		if weaponInfo == nil {
+			log.Printf("[Login] ERROR: Whitelisted weapon %d not found in WZ data", selected.weapon)
+			_ = h.conn.Write(CreateNewCharacterResultFailed(LoginResultSystemError))
+			return
 		}
+		equipped = append(equipped, utils.NewEquipFromItemInfo(weaponInfo, models.InvEquipped, models.EquipSlotWeapon))
 	}
 
 	// One transactional create: character + items
@@ -388,6 +455,20 @@ func (h *Handler) handleSelectCharacter(reader *protocol.Reader) {
 	characterID := reader.ReadInt()
 	_ = reader.ReadString() // macAddress
 	_ = reader.ReadString() // macAddressWithHDDSerial
+
+	// CRITICAL: Validate character ownership to prevent hijacking
+	char, err := h.characters.FindByID(h.ctx, uint(characterID))
+	if err != nil {
+		log.Printf("[Login] Character %d not found: %v", characterID, err)
+		_ = h.conn.Close()
+		return
+	}
+	if char.AccountID != h.accountID {
+		log.Printf("[Login] SECURITY: Account %d attempted to select character %d owned by account %d",
+			h.accountID, characterID, char.AccountID)
+		_ = h.conn.Close()
+		return
+	}
 
 	log.Printf("[Login] Selected character: %d", characterID)
 	port, _ := strconv.Atoi(h.config.ChannelPort)

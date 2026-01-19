@@ -15,19 +15,21 @@ type Server struct {
 	characters interfaces.CharacterRepo
 	items      interfaces.ItemsRepo
 	fields     *field.Manager
+	accounts   interfaces.AccountRepo
 
 	listener net.Listener
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
 
-func NewServer(cfg *ChannelConfig, chars interfaces.CharacterRepo, items interfaces.ItemsRepo, fieldMgr *field.Manager) *Server {
+func NewServer(cfg *ChannelConfig, chars interfaces.CharacterRepo, items interfaces.ItemsRepo, fieldMgr *field.Manager, accounts interfaces.AccountRepo) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		config:     cfg,
 		characters: chars,
 		items:      items,
 		fields:     fieldMgr,
+		accounts:   accounts,
 		ctx:        ctx,
 		cancel:     cancel,
 	}
@@ -84,14 +86,14 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	defer c.Close()
 
 	// Set opcode names for debug logging
-	c.SetOpcodeNames(RecvOpcodeNames, SendOpcodeNames)
+	c.SetOpcodeNames(RecvOpcodeNames, SendOpcodeNames, IgnoredRecvOpcodes, IgnoredSendOpcodes)
 
 	if err := c.SendHandshake(s.config.GameVersion, s.config.PatchVersion, s.config.Locale); err != nil {
 		log.Printf("Handshake failed: %v", err)
 		return
 	}
 
-	handler := NewHandler(ctx, c, s.config, s.characters, s.items, s.fields)
+	handler := NewHandler(ctx, c, s.config, s.characters, s.items, s.fields, s.accounts)
 
 	for {
 		p, err := c.Read()

@@ -10,6 +10,7 @@ type AccountRepo interface {
 	FindByUsername(ctx context.Context, username string) (*models.Account, error)
 	Create(ctx context.Context, username, password string) (*models.Account, error)
 	VerifyPassword(account *models.Account, password string) bool
+	FindByID(ctx context.Context, id uint) (*models.Account, error)
 }
 
 type CharacterRepo interface {
