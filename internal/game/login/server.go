@@ -86,7 +86,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	defer c.Close()
 
 	// Set opcode names for debug logging
-	c.SetOpcodeNames(RecvOpcodeNames, SendOpcodeNames)
+	c.SetOpcodeNames(RecvOpcodeNames, SendOpcodeNames, IgnoredRecvOpcodes, IgnoredSendOpcodes)
 
 	if err := c.SendHandshake(s.config.GameVersion, s.config.PatchVersion, s.config.Locale); err != nil {
 		log.Printf("Handshake failed: %v", err)

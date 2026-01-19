@@ -16,20 +16,45 @@ type Server struct {
 	items      interfaces.ItemsRepo
 	fields     *field.Manager
 
+	// Additional repositories for migration
+	accounts    interfaces.AccountRepo
+	skills      interfaces.SkillRepo
+	keyBindings interfaces.KeyBindingRepo
+	quickSlots  interfaces.QuickSlotRepo
+	macros      interfaces.SkillMacroRepo
+	quests      interfaces.QuestProgressRepo
+
 	listener net.Listener
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
 
-func NewServer(cfg *ChannelConfig, chars interfaces.CharacterRepo, items interfaces.ItemsRepo, fieldMgr *field.Manager) *Server {
+func NewServer(
+	cfg *ChannelConfig,
+	chars interfaces.CharacterRepo,
+	items interfaces.ItemsRepo,
+	fieldMgr *field.Manager,
+	accounts interfaces.AccountRepo,
+	skills interfaces.SkillRepo,
+	keyBindings interfaces.KeyBindingRepo,
+	quickSlots interfaces.QuickSlotRepo,
+	macros interfaces.SkillMacroRepo,
+	quests interfaces.QuestProgressRepo,
+) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
-		config:     cfg,
-		characters: chars,
-		items:      items,
-		fields:     fieldMgr,
-		ctx:        ctx,
-		cancel:     cancel,
+		config:      cfg,
+		characters:  chars,
+		items:       items,
+		fields:      fieldMgr,
+		accounts:    accounts,
+		skills:      skills,
+		keyBindings: keyBindings,
+		quickSlots:  quickSlots,
+		macros:      macros,
+		quests:      quests,
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 }
 
@@ -84,14 +109,15 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	defer c.Close()
 
 	// Set opcode names for debug logging
-	c.SetOpcodeNames(RecvOpcodeNames, SendOpcodeNames)
+	c.SetOpcodeNames(RecvOpcodeNames, SendOpcodeNames, IgnoredRecvOpcodes, IgnoredSendOpcodes)
 
 	if err := c.SendHandshake(s.config.GameVersion, s.config.PatchVersion, s.config.Locale); err != nil {
 		log.Printf("Handshake failed: %v", err)
 		return
 	}
 
-	handler := NewHandler(ctx, c, s.config, s.characters, s.items, s.fields)
+	handler := NewHandler(ctx, c, s.config, s.characters, s.items, s.fields,
+		s.accounts, s.skills, s.keyBindings, s.quickSlots, s.macros, s.quests)
 
 	for {
 		p, err := c.Read()
