@@ -410,3 +410,12 @@ func UserMove(characterID uint, movePath *field.MovePath) protocol.Packet {
 	movePath.Encode(&p)
 	return p
 }
+
+func UserChat(characterID uint, messageType byte, text string, onlyBalloon bool) protocol.Packet {
+	p := protocol.NewWithOpcode(SendUserChat)
+	p.WriteInt(int32(characterID))
+	p.WriteByte(messageType)
+	p.WriteString(text)
+	p.WriteBool(onlyBalloon)
+	return p
+}

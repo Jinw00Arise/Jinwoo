@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	ReadTimeout  = 5 * time.Minute  // Disconnect if no packet received for this duration
+	ReadTimeout  = 25 * time.Minute // Disconnect if no packet received for this duration
 	WriteTimeout = 30 * time.Second // Timeout for write operations
 )
 

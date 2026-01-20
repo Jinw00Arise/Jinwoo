@@ -68,6 +68,8 @@ func (h *Handler) Handle(p protocol.Packet) {
 		h.handleUpdateScreenSetting(reader)
 	case RecvUserMove:
 		h.handleUserMove(reader)
+	case RecvUserChat:
+		h.handleUserChat(reader)
 	default:
 		log.Printf("[Channel] Unhandled opcode: 0x%04X (%d)", reader.Opcode, reader.Opcode)
 	}
@@ -207,5 +209,18 @@ func (h *Handler) handleUserMove(reader *protocol.Reader) {
 	currentField := h.user.Field()
 	if currentField != nil {
 		currentField.BroadcastExcept(UserMove(h.user.CharacterID(), movePath), h.user)
+	}
+}
+
+func (h *Handler) handleUserChat(reader *protocol.Reader) {
+	_ = reader.ReadInt()             // update time
+	text := reader.ReadString()      // sText
+	onlyBalloon := reader.ReadBool() // bOnlyBalloon
+	// TODO: add command processing
+	currentField := h.user.Field()
+	if currentField != nil {
+		currentField.Broadcast(UserChat(h.user.CharacterID(), 0, text, onlyBalloon))
+	} else {
+		log.Printf("User Chat(%d) not found", h.user.CharacterID())
 	}
 }

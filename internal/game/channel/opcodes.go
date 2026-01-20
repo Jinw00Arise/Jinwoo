@@ -4,6 +4,7 @@ package channel
 const (
 	RecvMigrateIn                  uint16 = 20
 	RecvUserMove                   uint16 = 44
+	RecvUserChat                   uint16 = 54
 	RecvUserPortalScriptRequest    uint16 = 112
 	RecvUpdateGMBoard              uint16 = 192
 	RecvUpdateScreenSetting        uint16 = 218
@@ -14,12 +15,14 @@ const (
 // Server -> Client
 const (
 	SendSetField uint16 = 141
+	SendUserChat uint16 = 181
 	SendUserMove uint16 = 210
 )
 
 var RecvOpcodeNames = map[uint16]string{
 	RecvMigrateIn:                  "MigrateIn",
 	RecvUserMove:                   "UserMove",
+	RecvUserChat:                   "UserChat",
 	RecvUserPortalScriptRequest:    "UserPortalScriptRequest",
 	RecvUpdateGMBoard:              "UpdateGMBoard",
 	RecvUpdateScreenSetting:        "UpdateScreenSetting",
@@ -29,6 +32,7 @@ var RecvOpcodeNames = map[uint16]string{
 
 var SendOpcodeNames = map[uint16]string{
 	SendSetField: "SetField",
+	SendUserChat: "UserChat",
 	SendUserMove: "UserMove",
 }
 
