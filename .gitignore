@@ -2,5 +2,5 @@
 .env
 bin/
 go.work
-wz/
+/wz
 *.pid

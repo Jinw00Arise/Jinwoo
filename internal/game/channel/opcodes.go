@@ -14,9 +14,15 @@ const (
 
 // Server -> Client
 const (
-	SendSetField uint16 = 141
-	SendUserChat uint16 = 181
-	SendUserMove uint16 = 210
+	SendSetField            uint16 = 141
+	SendUserEnterField      uint16 = 179
+	SendUserLeaveField      uint16 = 180
+	SendUserChat            uint16 = 181
+	SendUserMove            uint16 = 210
+	SendNpcEnterField       uint16 = 311
+	SendNpcLeaveField       uint16 = 312
+	SendNpcChangeController uint16 = 313
+	SendNpcMove             uint16 = 314
 )
 
 var RecvOpcodeNames = map[uint16]string{
@@ -31,9 +37,15 @@ var RecvOpcodeNames = map[uint16]string{
 }
 
 var SendOpcodeNames = map[uint16]string{
-	SendSetField: "SetField",
-	SendUserChat: "UserChat",
-	SendUserMove: "UserMove",
+	SendSetField:            "SetField",
+	SendUserEnterField:      "UserEnterField",
+	SendUserLeaveField:      "UserLeaveField",
+	SendUserChat:            "UserChat",
+	SendUserMove:            "UserMove",
+	SendNpcEnterField:       "NpcEnterField",
+	SendNpcLeaveField:       "NpcLeaveField",
+	SendNpcChangeController: "NpcChangeController",
+	SendNpcMove:             "NpcMove",
 }
 
 var IgnoredRecvOpcodes = map[uint16]struct{}{

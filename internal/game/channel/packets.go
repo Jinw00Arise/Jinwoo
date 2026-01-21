@@ -21,14 +21,10 @@ func SetField(char *models.Character, channelID int, fieldKey byte, items []*mod
 	p.WriteByte(1)               // bCharacterData (true = migration, sends full data)
 	p.WriteShort(0)              // nNotifierCheck
 
-	// CalcDamage seeds
-	s1 := int32(rand.Uint32())
-	s2 := int32(rand.Uint32())
-	s3 := int32(rand.Uint32())
 	// set seed for user calc damage
-	p.WriteInt(s1)
-	p.WriteInt(s2)
-	p.WriteInt(s3)
+	for _ = range 3 {
+		p.WriteInt(int32(rand.Uint32()))
+	}
 
 	// CharacterData::Decode
 	writeCharacterDataFull(&p, char, items)
@@ -417,5 +413,83 @@ func UserChat(characterID uint, messageType byte, text string, onlyBalloon bool)
 	p.WriteByte(messageType)
 	p.WriteString(text)
 	p.WriteBool(onlyBalloon)
+	return p
+}
+
+func NpcEnterField(npc *field.NPC) protocol.Packet {
+	p := protocol.NewWithOpcode(SendNpcEnterField)
+	p.WriteInt(npc.ObjectID())       // dwNpcId (object ID, not template ID)
+	p.WriteInt(npc.TemplateID())     // dwTemplateID
+	p.WriteShort(uint16(npc.GetX())) // Position X
+	p.WriteShort(uint16(npc.GetY())) // Position Y
+	if npc.IsFlipped() {
+		p.WriteByte(0) // Move action (facing left)
+	} else {
+		p.WriteByte(1) // Move action (facing right)
+	}
+	p.WriteShort(uint16(npc.Foothold())) // Foothold
+	p.WriteShort(uint16(npc.GetRX0()))   // Left bound
+	p.WriteShort(uint16(npc.GetRX1()))   // Right bound
+	p.WriteBool(true)                    // bEnabled (NPC is active)
+	return p
+}
+
+func UserEnterField(user *field.User) protocol.Packet {
+	p := protocol.NewWithOpcode(SendUserEnterField)
+	p.WriteInt(int32(user.Character().ID)) // dwCharacterId
+	// CUserRemote::Init
+	p.WriteByte(user.Character().Level)
+	p.WriteString(user.Character().Name)
+
+	// Guild Info
+	p.WriteString("") // sGuildName
+	p.WriteShort(0)   // nGuildMarkBg
+	p.WriteByte(0)    // nGuildMarkBgColor
+	p.WriteShort(0)   // nGuildMark
+	p.WriteByte(0)    // nGuildMarkColor
+
+	// TODO: SecondaryStat::DecodeForRemote
+	p.WriteShort(uint16(user.Character().Job)) // nJobCode
+	// TODO: AvatarLook::AvatarLook
+
+	p.WriteInt(0) // dwDriverID
+	p.WriteInt(0) // dwPassenserID
+	p.WriteInt(0) // nChocoCount
+	p.WriteInt(0) // TODO: nActiveEffectItemID
+	p.WriteInt(0) // nCompletedSetItemID
+	p.WriteInt(0) // TODO: nPortableChairID
+
+	x, y := user.Position()
+	p.WriteShort(x)
+	p.WriteShort(y)
+	p.WriteByte(user.MoveAction()) // TODO: nMoveAction
+	p.WriteShort(user.Foothold())
+
+	p.WriteBool(false) // bShowAdminEffect
+
+	// TODO: For pet in pets
+	p.WriteByte(0) // terminator
+
+	p.WriteInt(0) // nTamingMobLevel
+	p.WriteInt(0) // nTamingMobExp
+	p.WriteInt(0) // nTamingMobFatigue
+
+	// TODO: Handle Mini Rooms
+	p.WriteByte(0) // terminator -- only if no mini rooms
+
+	p.WriteBool(false) // TODO: bADBoardRemote
+
+	// Couple
+	p.WriteBool(false)
+	p.WriteBool(false)
+	p.WriteBool(false)
+
+	// TODO: CUser::DarkForceEffect | CDragon::CreateEffect | CUser::LoadSwallowingEffect
+	p.WriteByte(0) // terminator
+
+	p.WriteBool(false) // bool -> int * int (CUserPool::OnNewYearCardRecordAdd)
+	p.WriteInt(0)      // nPhase
+
+	// TODO: field->DecodeFieldSpecificData
 	return p
 }

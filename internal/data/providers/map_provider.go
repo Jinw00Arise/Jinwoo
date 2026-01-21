@@ -14,17 +14,43 @@ type MapData struct {
 	SpawnPoint   Portal
 	Portals      map[string]Portal
 	Footholds    []Foothold
+	NPCSpawns    []LifeSpawn
+	MobSpawns    []LifeSpawn
+}
+
+// LifeType indicates whether a life entry is an NPC or mob
+type LifeType string
+
+const (
+	LifeTypeNPC LifeType = "n"
+	LifeTypeMob LifeType = "m"
+)
+
+// LifeSpawn represents an NPC or mob spawn point from map WZ data
+type LifeSpawn struct {
+	Type    LifeType
+	ID      int32 // Template ID (NPC ID or Mob ID)
+	X       uint16
+	Y       uint16
+	Cy      uint16 // Spawn Y (often same as Y)
+	Fh      uint16 // Foothold
+	Rx0     uint16 // Left roaming bound
+	Rx1     uint16 // Right roaming bound
+	F       bool   // Flipped (facing left)
+	Hide    bool   // Hidden on spawn
+	MobTime int32  // Respawn time for mobs (milliseconds)
+	Team    int32  // Team number (for PvP maps)
 }
 
 // Portal type constants
 const (
-	PortalTypeStartPoint  int32 = 0 // Spawn point
-	PortalTypeVisible     int32 = 1 // Regular portal
-	PortalTypeHidden      int32 = 2 // Hidden portal (activated by proximity)
-	PortalTypeScripted    int32 = 3 // Script-triggered portal
-	PortalTypeAutomatic   int32 = 4 // Auto-trigger on contact
-	PortalTypeCollision   int32 = 6 // Collision-based portal
-	PortalTypeChangeable  int32 = 7 // Can change destination
+	PortalTypeStartPoint int32 = 0 // Spawn point
+	PortalTypeVisible    int32 = 1 // Regular portal
+	PortalTypeHidden     int32 = 2 // Hidden portal (activated by proximity)
+	PortalTypeScripted   int32 = 3 // Script-triggered portal
+	PortalTypeAutomatic  int32 = 4 // Auto-trigger on contact
+	PortalTypeCollision  int32 = 6 // Collision-based portal
+	PortalTypeChangeable int32 = 7 // Can change destination
 )
 
 // PortalInvalidTarget is the sentinel value for portals without a target map
@@ -33,8 +59,8 @@ const PortalInvalidTarget int32 = 999999999
 type Portal struct {
 	Name string
 	Type int32
-	X    int16
-	Y    int16
+	X    uint16
+	Y    uint16
 	TM   int32  // Target map (PortalInvalidTarget if none)
 	TN   string // Target portal name
 }
@@ -148,6 +174,16 @@ func (p *MapProvider) parseMapData(mapID int32, root *wz.ImgDir) (*MapData, erro
 		mapData.Footholds = footholds
 	}
 
+	// Parse life (NPCs and mobs)
+	if lifeSection := root.Get("life"); lifeSection != nil {
+		npcs, mobs, err := p.parseLife(lifeSection)
+		if err != nil {
+			return nil, fmt.Errorf("map %d life: %w", mapID, err)
+		}
+		mapData.NPCSpawns = npcs
+		mapData.MobSpawns = mobs
+	}
+
 	return mapData, nil
 }
 
@@ -170,13 +206,13 @@ func (p *MapProvider) parsePortal(portalDir *wz.ImgDir) (Portal, error) {
 	if err != nil {
 		return portal, fmt.Errorf("missing x: %w", err)
 	}
-	portal.X = int16(x)
+	portal.X = uint16(x)
 
 	y, err := portalDir.GetInt("y")
 	if err != nil {
 		return portal, fmt.Errorf("missing y: %w", err)
 	}
-	portal.Y = int16(y)
+	portal.Y = uint16(y)
 
 	// tm and tn are optional (not all portals have targets)
 	// Use sentinel value for missing tm to prevent accidental teleport to map 0
@@ -267,4 +303,105 @@ func (p *MapProvider) parseFoothold(fhDir *wz.ImgDir, id, layer int32) (Foothold
 	fh.Next = next
 
 	return fh, nil
+}
+
+func (p *MapProvider) parseLife(lifeSection *wz.ImgDir) (npcs, mobs []LifeSpawn, err error) {
+	for i := range lifeSection.ImgDirs {
+		lifeDir := &lifeSection.ImgDirs[i]
+
+		spawn, err := p.parseLifeSpawn(lifeDir)
+		if err != nil {
+			// Skip invalid life entries rather than failing the whole map
+			continue
+		}
+
+		switch spawn.Type {
+		case LifeTypeNPC:
+			npcs = append(npcs, spawn)
+		case LifeTypeMob:
+			mobs = append(mobs, spawn)
+		}
+	}
+
+	return npcs, mobs, nil
+}
+
+func (p *MapProvider) parseLifeSpawn(lifeDir *wz.ImgDir) (LifeSpawn, error) {
+	spawn := LifeSpawn{}
+
+	// Type is required: "n" for NPC, "m" for mob
+	typeStr, err := lifeDir.GetString("type")
+	if err != nil {
+		return spawn, fmt.Errorf("missing type: %w", err)
+	}
+	spawn.Type = LifeType(typeStr)
+
+	// ID is the template ID - can be string in WZ
+	idStr, err := lifeDir.GetString("id")
+	if err != nil {
+		return spawn, fmt.Errorf("missing id: %w", err)
+	}
+	id, err := strconv.ParseInt(idStr, 10, 32)
+	if err != nil {
+		return spawn, fmt.Errorf("invalid id %s: %w", idStr, err)
+	}
+	spawn.ID = int32(id)
+
+	// Position - required
+	x, err := lifeDir.GetInt("x")
+	if err != nil {
+		return spawn, fmt.Errorf("missing x: %w", err)
+	}
+	spawn.X = uint16(x)
+
+	y, err := lifeDir.GetInt("y")
+	if err != nil {
+		return spawn, fmt.Errorf("missing y: %w", err)
+	}
+	spawn.Y = uint16(y)
+
+	// Optional fields with defaults
+	if cy, err := lifeDir.GetInt("cy"); err == nil {
+		spawn.Cy = uint16(cy)
+	} else {
+		spawn.Cy = spawn.Y // Default to Y
+	}
+
+	if fh, err := lifeDir.GetInt("fh"); err == nil {
+		spawn.Fh = uint16(fh)
+	}
+
+	if rx0, err := lifeDir.GetInt("rx0"); err == nil {
+		spawn.Rx0 = uint16(rx0)
+	} else {
+		spawn.Rx0 = spawn.X // Default to X
+	}
+
+	if rx1, err := lifeDir.GetInt("rx1"); err == nil {
+		spawn.Rx1 = uint16(rx1)
+	} else {
+		spawn.Rx1 = spawn.X // Default to X
+	}
+
+	// f = 1 means flipped (facing left)
+	if f, err := lifeDir.GetInt("f"); err == nil {
+		spawn.F = f == 1
+	}
+
+	// hide = 1 means hidden
+	if hide, err := lifeDir.GetInt("hide"); err == nil {
+		spawn.Hide = hide == 1
+	}
+
+	// mobTime - respawn time for mobs
+	if mobTime, err := lifeDir.GetInt("mobTime"); err == nil {
+		spawn.MobTime = mobTime
+	}
+
+	// team - for PvP maps
+	if team, err := lifeDir.GetInt("team"); err == nil {
+		spawn.Team = team
+	}
+
+	return spawn, nil
 }

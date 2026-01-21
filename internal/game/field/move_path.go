@@ -4,9 +4,9 @@ import "github.com/Jinw00Arise/Jinwoo/internal/protocol"
 
 // Life is an interface for entities that can move (users, mobs, npcs)
 type Life interface {
-	SetX(x int16)
-	SetY(y int16)
-	SetFoothold(fh int16)
+	SetX(x uint16)
+	SetY(y uint16)
+	SetFoothold(fh uint16)
 	SetMoveAction(action byte)
 }
 
@@ -43,24 +43,24 @@ func MoveTypeFromAttr(attr byte) MoveType {
 
 type MoveElem struct {
 	Attr        byte
-	X           int16
-	Y           int16
-	Vx          int16
-	Vy          int16
-	Fh          int16
-	FhFallStart int16
-	XOffset     int16
-	YOffset     int16
+	X           uint16
+	Y           uint16
+	Vx          uint16
+	Vy          uint16
+	Fh          uint16
+	FhFallStart uint16
+	XOffset     uint16
+	YOffset     uint16
 	Stat        byte
 	MoveAction  byte
-	Elapse      int16
+	Elapse      uint16
 }
 
 type MovePath struct {
-	X         int16
-	Y         int16
-	Vx        int16
-	Vy        int16
+	X         uint16
+	Y         uint16
+	Vx        uint16
+	Vy        uint16
 	MoveElems []MoveElem
 }
 
@@ -140,10 +140,10 @@ func (mp *MovePath) Encode(p *protocol.Packet) {
 }
 
 func DecodeMovePath(reader *protocol.Reader) *MovePath {
-	x := int16(reader.ReadShort())
-	y := int16(reader.ReadShort())
-	vx := int16(reader.ReadShort())
-	vy := int16(reader.ReadShort())
+	x := uint16(reader.ReadShort())
+	y := uint16(reader.ReadShort())
+	vx := uint16(reader.ReadShort())
+	vy := uint16(reader.ReadShort())
 
 	count := int(reader.ReadByte())
 	moveElems := make([]MoveElem, 0, count)
@@ -154,25 +154,25 @@ func DecodeMovePath(reader *protocol.Reader) *MovePath {
 
 		switch MoveTypeFromAttr(attr) {
 		case MoveTypeNormal:
-			elem.X = int16(reader.ReadShort())
-			elem.Y = int16(reader.ReadShort())
-			elem.Vx = int16(reader.ReadShort())
-			elem.Vy = int16(reader.ReadShort())
-			elem.Fh = int16(reader.ReadShort())
+			elem.X = uint16(reader.ReadShort())
+			elem.Y = uint16(reader.ReadShort())
+			elem.Vx = uint16(reader.ReadShort())
+			elem.Vy = uint16(reader.ReadShort())
+			elem.Fh = uint16(reader.ReadShort())
 			if attr == 12 { // FALL_DOWN
-				elem.FhFallStart = int16(reader.ReadShort())
+				elem.FhFallStart = uint16(reader.ReadShort())
 			}
-			elem.XOffset = int16(reader.ReadShort())
-			elem.YOffset = int16(reader.ReadShort())
+			elem.XOffset = uint16(reader.ReadShort())
+			elem.YOffset = uint16(reader.ReadShort())
 		case MoveTypeJump:
 			elem.X = x
 			elem.Y = y
-			elem.Vx = int16(reader.ReadShort())
-			elem.Vy = int16(reader.ReadShort())
+			elem.Vx = uint16(reader.ReadShort())
+			elem.Vy = uint16(reader.ReadShort())
 		case MoveTypeTeleport:
-			elem.X = int16(reader.ReadShort())
-			elem.Y = int16(reader.ReadShort())
-			elem.Fh = int16(reader.ReadShort())
+			elem.X = uint16(reader.ReadShort())
+			elem.Y = uint16(reader.ReadShort())
+			elem.Fh = uint16(reader.ReadShort())
 		case MoveTypeStatChange:
 			elem.Stat = reader.ReadByte()
 			elem.X = x
@@ -182,14 +182,14 @@ func DecodeMovePath(reader *protocol.Reader) *MovePath {
 		case MoveTypeStartFallDown:
 			elem.X = x
 			elem.Y = y
-			elem.Vx = int16(reader.ReadShort())
-			elem.Vy = int16(reader.ReadShort())
-			elem.FhFallStart = int16(reader.ReadShort())
+			elem.Vx = uint16(reader.ReadShort())
+			elem.Vy = uint16(reader.ReadShort())
+			elem.FhFallStart = uint16(reader.ReadShort())
 		case MoveTypeFlyingBlock:
-			elem.X = int16(reader.ReadShort())
-			elem.Y = int16(reader.ReadShort())
-			elem.Vx = int16(reader.ReadShort())
-			elem.Vy = int16(reader.ReadShort())
+			elem.X = uint16(reader.ReadShort())
+			elem.Y = uint16(reader.ReadShort())
+			elem.Vx = uint16(reader.ReadShort())
+			elem.Vy = uint16(reader.ReadShort())
 		case MoveTypeAction:
 			elem.X = x
 			elem.Y = y
@@ -198,7 +198,7 @@ func DecodeMovePath(reader *protocol.Reader) *MovePath {
 		}
 
 		elem.MoveAction = reader.ReadByte()
-		elem.Elapse = int16(reader.ReadShort())
+		elem.Elapse = uint16(reader.ReadShort())
 		moveElems = append(moveElems, elem)
 	}
 

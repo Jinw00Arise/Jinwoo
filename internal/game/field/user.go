@@ -17,9 +17,9 @@ type User struct {
 	// Current field and position
 	field      *Field
 	fieldKey   byte
-	posX       int16
-	posY       int16
-	foothold   int16
+	posX       uint16
+	posY       uint16
+	foothold   uint16
 	moveAction byte
 
 	mu sync.RWMutex
@@ -88,14 +88,14 @@ func (u *User) IncrementStageKey() byte {
 }
 
 // Position returns the user's current position
-func (u *User) Position() (x, y int16) {
+func (u *User) Position() (x, y uint16) {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
 	return u.posX, u.posY
 }
 
 // SetPosition updates the user's position
-func (u *User) SetPosition(x, y int16) {
+func (u *User) SetPosition(x, y uint16) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.posX = x
@@ -222,28 +222,28 @@ func (u *User) Items() []*models.CharacterItem {
 	return cpy
 }
 
-func (u *User) SetX(x int16) {
+func (u *User) SetX(x uint16) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.posX = x
 }
 
 // SetY sets the user's Y position (implements Life interface)
-func (u *User) SetY(y int16) {
+func (u *User) SetY(y uint16) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.posY = y
 }
 
 // Foothold returns the user's current foothold
-func (u *User) Foothold() int16 {
+func (u *User) Foothold() uint16 {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
 	return u.foothold
 }
 
 // SetFoothold sets the user's foothold (implements Life interface)
-func (u *User) SetFoothold(fh int16) {
+func (u *User) SetFoothold(fh uint16) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.foothold = fh

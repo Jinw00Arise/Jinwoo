@@ -154,6 +154,17 @@ func (h *Handler) handleMigrateIn(reader *protocol.Reader) {
 		return
 	}
 
+	for _, npc := range targetField.GetAllNPCs() {
+		h.user.Write(NpcEnterField(npc))
+	}
+
+	for _, char := range targetField.GetAllUsers() {
+		if char.CharacterID() != h.user.CharacterID() {
+			h.user.Write(UserEnterField(char))
+		}
+	}
+	targetField.BroadcastExcept(UserEnterField(h.user), h.user)
+
 	log.Printf("Player %s spawned on map %d", char.Name, char.MapID)
 }
 
