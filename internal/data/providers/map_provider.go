@@ -57,12 +57,13 @@ const (
 const PortalInvalidTarget int32 = 999999999
 
 type Portal struct {
-	Name string
-	Type int32
-	X    uint16
-	Y    uint16
-	TM   int32  // Target map (PortalInvalidTarget if none)
-	TN   string // Target portal name
+	Name   string
+	Type   int32
+	X      uint16
+	Y      uint16
+	TM     int32  // Target map (PortalInvalidTarget if none)
+	TN     string // Target portal name
+	Script string
 }
 
 // HasTarget returns true if this portal has a valid target map
@@ -78,6 +79,10 @@ func (p Portal) IsUsableByPlayer() bool {
 	default:
 		return false
 	}
+}
+
+func (p Portal) GetScript() string {
+	return p.Script
 }
 
 type Foothold struct {
@@ -213,6 +218,11 @@ func (p *MapProvider) parsePortal(portalDir *wz.ImgDir) (Portal, error) {
 		return portal, fmt.Errorf("missing y: %w", err)
 	}
 	portal.Y = uint16(y)
+
+	script, err := portalDir.GetString("script")
+	if script != "" {
+		portal.Script = script
+	}
 
 	// tm and tn are optional (not all portals have targets)
 	// Use sentinel value for missing tm to prevent accidental teleport to map 0

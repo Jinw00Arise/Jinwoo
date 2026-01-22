@@ -1,0 +1,113 @@
+package server
+
+import "github.com/Jinw00Arise/Jinwoo/internal/game/packets"
+
+// Login Client -> Server opcodes
+const (
+	RecvCheckPassword        uint16 = 1
+	RecvGuestIDLogin         uint16 = 2
+	RecvAccountInfoRequest   uint16 = 3
+	RecvWorldInfoRequest     uint16 = 4
+	RecvSelectWorld          uint16 = 5
+	RecvCheckUserLimit       uint16 = 6
+	RecvWorldRequest         uint16 = 11
+	RecvLogoutWorld          uint16 = 12
+	RecvSelectCharacter      uint16 = 19
+	RecvCheckDuplicatedID    uint16 = 21
+	RecvCreateNewCharacter   uint16 = 22
+	RecvDeleteCharacter      uint16 = 24
+	RecvCreateSecurityHandle uint16 = 34
+	RecvClientDumpLog        uint16 = 36
+	RecvUpdateScreenSetting  uint16 = 218
+)
+
+// Login Server -> Client opcodes
+const (
+	SendCheckPasswordResult      uint16 = 0
+	SendCheckUserLimitResult     uint16 = 3
+	SendWorldInformation         uint16 = 10
+	SendSelectWorldResult        uint16 = 11
+	SendSelectCharacterResult    uint16 = 12
+	SendCheckDuplicatedIDResult  uint16 = 13
+	SendCreateNewCharacterResult uint16 = 14
+	SendDeleteCharacterResult    uint16 = 15
+	SendLatestConnectedWorld     uint16 = 24
+)
+
+// Channel opcodes from packets package
+const (
+	RecvMigrateIn                  = packets.RecvMigrateIn
+	RecvUserTransferFieldRequest   = packets.RecvUserTransferFieldRequest
+	RecvUserMove                   = packets.RecvUserMove
+	RecvUserChat                   = packets.RecvUserChat
+	RecvUserScriptMessageAnswer    = packets.RecvUserScriptMessageAnswer
+	RecvUserPortalScriptRequest    = packets.RecvUserPortalScriptRequest
+	RecvUpdateGMBoard              = packets.RecvUpdateGMBoard
+	RecvChannelUpdateScreenSetting = packets.RecvUpdateScreenSetting
+	RecvNpcMove                    = packets.RecvNpcMove
+	RecvRequireFieldObstacleStatus = packets.RecvRequireFieldObstacleStatus
+	RecvCancelInvitePartyMatch     = packets.RecvCancelInvitePartyMatch
+)
+
+const (
+	SendSetField            = packets.SendSetField
+	SendUserEnterField      = packets.SendUserEnterField
+	SendUserLeaveField      = packets.SendUserLeaveField
+	SendUserChat            = packets.SendUserChat
+	SendUserMove            = packets.SendUserMove
+	SendNpcEnterField       = packets.SendNpcEnterField
+	SendNpcLeaveField       = packets.SendNpcLeaveField
+	SendNpcChangeController = packets.SendNpcChangeController
+	SendNpcMove             = packets.SendNpcMove
+	SendMigrateCommand      = packets.SendMigrateCommand
+)
+
+// LoginRecvOpcodeNames maps login recv opcodes to names for debugging
+var LoginRecvOpcodeNames = map[uint16]string{
+	RecvCheckPassword:        "CheckPassword",
+	RecvGuestIDLogin:         "GuestIDLogin",
+	RecvAccountInfoRequest:   "AccountInfoRequest",
+	RecvWorldInfoRequest:     "WorldInfoRequest",
+	RecvSelectWorld:          "SelectWorld",
+	RecvCheckUserLimit:       "CheckUserLimit",
+	RecvWorldRequest:         "WorldRequest",
+	RecvLogoutWorld:          "LogoutWorld",
+	RecvSelectCharacter:      "SelectCharacter",
+	RecvCheckDuplicatedID:    "CheckDuplicatedID",
+	RecvCreateNewCharacter:   "CreateNewCharacter",
+	RecvDeleteCharacter:      "DeleteCharacter",
+	RecvCreateSecurityHandle: "CreateSecurityHandle",
+	RecvClientDumpLog:        "ClientDumpLog",
+	RecvUpdateScreenSetting:  "UpdateScreenSetting",
+}
+
+// LoginSendOpcodeNames maps login send opcodes to names for debugging
+var LoginSendOpcodeNames = map[uint16]string{
+	SendCheckPasswordResult:      "CheckPasswordResult",
+	SendCheckUserLimitResult:     "CheckUserLimitResult",
+	SendWorldInformation:         "WorldInformation",
+	SendSelectWorldResult:        "SelectWorldResult",
+	SendSelectCharacterResult:    "SelectCharacterResult",
+	SendCheckDuplicatedIDResult:  "CheckDuplicatedIDResult",
+	SendCreateNewCharacterResult: "CreateNewCharacterResult",
+	SendDeleteCharacterResult:    "DeleteCharacterResult",
+	SendLatestConnectedWorld:     "LatestConnectedWorld",
+}
+
+// LoginIgnoredRecvOpcodes are opcodes to not log
+var LoginIgnoredRecvOpcodes = map[uint16]struct{}{}
+
+// LoginIgnoredSendOpcodes are opcodes to not log
+var LoginIgnoredSendOpcodes = map[uint16]struct{}{}
+
+// ChannelRecvOpcodeNames maps channel recv opcodes to names for debugging
+var ChannelRecvOpcodeNames = packets.RecvOpcodeNames
+
+// ChannelSendOpcodeNames maps channel send opcodes to names for debugging
+var ChannelSendOpcodeNames = packets.SendOpcodeNames
+
+// ChannelIgnoredRecvOpcodes are opcodes to not log
+var ChannelIgnoredRecvOpcodes = packets.IgnoredRecvOpcodes
+
+// ChannelIgnoredSendOpcodes are opcodes to not log
+var ChannelIgnoredSendOpcodes = packets.IgnoredSendOpcodes

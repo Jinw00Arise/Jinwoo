@@ -13,38 +13,64 @@ import (
 	"github.com/Jinw00Arise/Jinwoo/internal/data/providers"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/providers/wz"
 	"github.com/Jinw00Arise/Jinwoo/internal/data/repositories"
-	"github.com/Jinw00Arise/Jinwoo/internal/game/login"
+	"github.com/Jinw00Arise/Jinwoo/internal/game/server"
 )
 
 const shutdownTimeout = 30 * time.Second
 
 func main() {
-	log.Println("Starting Login Server")
+	log.Println("Starting Unified Game Server")
 
+	// Initialize crypto
 	if err := crypto.Init(); err != nil {
 		log.Fatalf("crypto.Init() failed: %v", err)
 	}
 
-	cfg := login.LoadLogin()
+	// Load configuration
+	cfg := server.Load()
 
+	// Database Connection
 	dbConn, err := db.Connect(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("Database connection failed: %v", err)
 	}
-	log.Println("[Login] Database connected")
+	log.Println("[Server] Database connected")
 
-	accRepo := repositories.NewAccountRepository(dbConn)
-	charRepo := repositories.NewCharacterRepo(dbConn)
-	itemRepo := repositories.NewItemRepo(dbConn)
+	// Create repositories
+	repos := server.Repositories{
+		Accounts:   repositories.NewAccountRepository(dbConn),
+		Characters: repositories.NewCharacterRepo(dbConn),
+		Items:      repositories.NewItemRepo(dbConn),
+		Quests:     repositories.NewQuestRepo(dbConn),
+	}
 
-	// Initialize WZ providers
+	// Initialize WZ data providers
+	log.Printf("[Server] Loading WZ data from: %s", cfg.WZPath)
 	wzProvider := wz.NewWzProvider(cfg.WZPath)
+
 	itemProvider, err := providers.NewItemProvider(wzProvider)
 	if err != nil {
 		log.Fatalf("Failed to initialize item provider: %v", err)
 	}
 
-	srv := login.NewServer(cfg, accRepo, charRepo, itemRepo, itemProvider)
+	mapProvider := providers.NewMapProvider(wzProvider)
+
+	questProvider, err := providers.NewQuestProvider(wzProvider)
+	if err != nil {
+		log.Fatalf("Failed to initialize quest provider: %v", err)
+	}
+
+	npcProvider := providers.NewNPCProvider(wzProvider)
+
+	provs := server.Providers{
+		Items:  itemProvider,
+		Maps:   mapProvider,
+		Quests: questProvider,
+		NPCs:   npcProvider,
+	}
+
+	// Create unified server
+	srv := server.NewServer(cfg, repos, provs)
 
 	// Start server
 	serverErr := make(chan error, 1)
@@ -74,6 +100,6 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("Shutdown error: %v", err)
 	} else {
-		log.Println("Login server shutdown complete")
+		log.Println("Server shutdown complete")
 	}
 }
